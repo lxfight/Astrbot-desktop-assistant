@@ -2,7 +2,81 @@
 name = "astrbot-desktop-client"
 version = "1.0.0"
 description = "AstrBot Desktop Assistant Client"
-requires-python = ">=3.10"
+requires-python = ">=3.9"
+readme = "README.md"
+authors = [
+    { name = "AstrBot Team" }
+]
+keywords = ["astrbot", "desktop", "assistant", "ai"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    # GUI 框架
+    "PySide6>=6.5.0",
+    "qasync>=0.27.1",
+
+    # HTTP 客户端
+    "httpx[http2]>=0.24.0",
+    "httpx-sse>=0.4.0",
+
+    # WebSocket 客户端
+    "websockets>=11.0.0",
+
+    # 屏幕截图
+    "Pillow>=9.0.0",
+    "mss>=9.0.0",
+
+    # 系统信息（用于桌面监控）
+    "psutil>=5.9.0",
+
+    # 全局快捷键
+    "pynput>=1.7.0",
+
+    # 配置管理
+    "pydantic>=2.0.0",
+
+    # 工具
+    "python-dateutil>=2.8.0",
+
+    # Markdown 渲染 & 代码高亮
+    "markdown>=3.4.0",
+    "pygments>=2.15.0",
+
+    # macOS 平台专用依赖
+    "pyobjc-framework-Cocoa>=9.0; sys_platform == 'darwin'",
+
+    # TOML 解析（Python < 3.11 需要）
+    "tomli>=2.0.0; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+dev = [
+    # 测试框架
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-mock>=3.10.0",
+    "pytest-qt>=4.2.0",
+
+    # 代码质量
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "flake8>=6.0.0",
+    "pylint>=2.17.0",
+    "mypy>=1.0.0",
+]
+
+windows = [
+    # Windows 平台专用依赖（用于窗口信息获取等）
+    "pywin32>=306",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

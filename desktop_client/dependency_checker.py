@@ -2,52 +2,170 @@
 依赖检查与自动安装模块
 
 在应用启动时检测必要依赖是否已安装，如果缺失则自动安装。
+从 pyproject.toml 读取依赖定义（单一真实来源）。
 """
 
 import subprocess
 import sys
-import importlib
 import importlib.util
-from typing import List, Tuple, Optional
+import re
+from typing import List, Tuple, Optional, Dict
 from pathlib import Path
 
 
-# 核心依赖列表：(模块名, pip包名, 是否必需)
-# 模块名用于 import 检测，pip包名用于安装
-CORE_DEPENDENCIES = [
-    # GUI 框架
-    ("PySide6", "PySide6>=6.5.0", True),
-    ("qasync", "qasync>=0.27.1", True),
-    # HTTP 客户端
-    ("httpx", "httpx[http2]>=0.24.0", True),
-    ("httpx_sse", "httpx-sse>=0.4.0", True),
-    # WebSocket
-    ("websockets", "websockets>=11.0.0", True),
-    # 截图
-    ("PIL", "Pillow>=9.0.0", True),
-    ("mss", "mss>=9.0.0", True),
-    # 系统信息
-    ("psutil", "psutil>=5.9.0", True),
-    # 全局快捷键
-    ("pynput", "pynput>=1.7.0", False),
-    # 配置管理
-    ("pydantic", "pydantic>=2.0.0", True),
-    # 工具
-    ("dateutil", "python-dateutil>=2.8.0", True),
-    # Markdown
-    ("markdown", "markdown>=3.4.0", True),
-    ("pygments", "pygments>=2.15.0", True),
-]
+# 包名到模块名的映射（处理导入名与包名不一致的情况）
+PACKAGE_TO_MODULE = {
+    "Pillow": "PIL",
+    "python-dateutil": "dateutil",
+    "httpx-sse": "httpx_sse",
+    "pyobjc-framework-Cocoa": "objc",
+    "pywin32": "win32api",
+    "tomli": "tomli",  # Python < 3.11 TOML 解析库
+}
 
-# Windows 专用依赖
-WINDOWS_DEPENDENCIES = [
-    ("win32api", "pywin32>=306", False),
-]
 
-# macOS 专用依赖
-MACOS_DEPENDENCIES = [
-    ("objc", "pyobjc-framework-Cocoa>=9.0", False),
-]
+def parse_pyproject_dependencies() -> Tuple[List[Tuple[str, str, bool]], Dict[str, List[Tuple[str, str, bool]]]]:
+    """从 pyproject.toml 解析依赖
+
+    Returns:
+        Tuple[核心依赖列表, 可选依赖字典]:
+            - 核心依赖: List[(模块名, pip包规范, 是否必需)]
+            - 可选依赖: Dict[组名, List[(模块名, pip包规范, 是否必需)]]
+    """
+    try:
+        import tomllib  # Python 3.11+
+    except ImportError:
+        try:
+            import tomli as tomllib  # fallback for Python < 3.11
+        except ImportError:
+            # tomllib 不可用，回退到硬编码依赖
+            return _get_fallback_dependencies()
+
+    pyproject_path = Path(__file__).parent.parent / "pyproject.toml"
+    if not pyproject_path.exists():
+        return _get_fallback_dependencies()
+
+    try:
+        with open(pyproject_path, "rb") as f:
+            data = tomllib.load(f)
+
+        core_deps = []
+        optional_deps = {}
+
+        # 解析核心依赖
+        if "project" in data and "dependencies" in data["project"]:
+            for dep_spec in data["project"]["dependencies"]:
+                module_name, pip_name, required = _parse_dependency_spec(dep_spec)
+                if module_name:  # 排除平台特定依赖
+                    core_deps.append((module_name, pip_name, required))
+
+        # 解析可选依赖
+        if "project" in data and "optional-dependencies" in data["project"]:
+            for group_name, deps in data["project"]["optional-dependencies"].items():
+                group_deps = []
+                for dep_spec in deps:
+                    module_name, pip_name, required = _parse_dependency_spec(dep_spec, required=False)
+                    if module_name:
+                        group_deps.append((module_name, pip_name, required))
+                optional_deps[group_name] = group_deps
+
+        return core_deps, optional_deps
+
+    except Exception as e:
+        print(f"警告: 解析 pyproject.toml 失败: {e}，使用回退依赖列表")
+        return _get_fallback_dependencies()
+
+
+def _parse_dependency_spec(dep_spec: str, required: bool = True) -> Tuple[Optional[str], str, bool]:
+    """解析单个依赖规范
+
+    Args:
+        dep_spec: 依赖规范字符串，如 "PySide6>=6.5.0" 或 "pyobjc-framework-Cocoa>=9.0; sys_platform == 'darwin'"
+        required: 是否为必需依赖
+
+    Returns:
+        Tuple[模块名, pip包规范, 是否必需]:
+            - 如果是平台特定依赖且不匹配当前平台，模块名返回 None
+    """
+    # 检查环境标记
+    if ";" in dep_spec:
+        dep_part, marker_part = dep_spec.split(";", 1)
+        dep_part = dep_part.strip()
+        marker_part = marker_part.strip()
+
+        # 解析 sys_platform 标记
+        if "sys_platform" in marker_part:
+            if "darwin" in marker_part and sys.platform != "darwin":
+                return None, dep_spec, required
+            if "win32" in marker_part and sys.platform != "win32":
+                return None, dep_spec, required
+            if "linux" in marker_part and sys.platform != "linux":
+                return None, dep_spec, required
+
+        # 解析 python_version 标记
+        if "python_version" in marker_part:
+            py_version = (sys.version_info.major, sys.version_info.minor)
+
+            # 解析版本比较（简单实现）
+            if "<" in marker_part:
+                # 提取版本号，如 "python_version < '3.11'" -> (3, 11)
+                version_match = re.search(r"['\"](\d+)\.(\d+)['\"]", marker_part)
+                if version_match:
+                    target_version = (int(version_match.group(1)), int(version_match.group(2)))
+                    if "<" in marker_part and ">=" not in marker_part:
+                        if not (py_version < target_version):
+                            return None, dep_spec, required
+                    elif ">=" in marker_part:
+                        if not (py_version >= target_version):
+                            return None, dep_spec, required
+    else:
+        dep_part = dep_spec
+
+    # 提取包名（移除版本约束）
+    match = re.match(r"([a-zA-Z0-9_\-\[\]]+)", dep_part)
+    if not match:
+        return None, dep_spec, required
+
+    package_name = match.group(1)
+
+    # 处理 extras（如 httpx[http2]）
+    if "[" in package_name:
+        package_name = package_name.split("[")[0]
+
+    # 获取模块名
+    module_name = PACKAGE_TO_MODULE.get(package_name, package_name.replace("-", "_"))
+
+    return module_name, dep_spec, required
+
+
+def _get_fallback_dependencies() -> Tuple[List[Tuple[str, str, bool]], Dict[str, List[Tuple[str, str, bool]]]]:
+    """回退依赖列表（当 pyproject.toml 不可用时使用）"""
+    core_deps = [
+        ("PySide6", "PySide6>=6.5.0", True),
+        ("qasync", "qasync>=0.27.1", True),
+        ("httpx", "httpx[http2]>=0.24.0", True),
+        ("httpx_sse", "httpx-sse>=0.4.0", True),
+        ("websockets", "websockets>=11.0.0", True),
+        ("PIL", "Pillow>=9.0.0", True),
+        ("mss", "mss>=9.0.0", True),
+        ("psutil", "psutil>=5.9.0", True),
+        ("pynput", "pynput>=1.7.0", True),
+        ("pydantic", "pydantic>=2.0.0", True),
+        ("dateutil", "python-dateutil>=2.8.0", True),
+        ("markdown", "markdown>=3.4.0", True),
+        ("pygments", "pygments>=2.15.0", True),
+    ]
+
+    optional_deps = {}
+
+    # 平台特定依赖
+    if sys.platform == "darwin":
+        core_deps.append(("objc", "pyobjc-framework-Cocoa>=9.0", False))
+
+    if sys.platform == "win32":
+        optional_deps["windows"] = [("win32api", "pywin32>=306", False)]
+
+    return core_deps, optional_deps
 
 
 def check_module_installed(module_name: str) -> bool:
@@ -60,35 +178,36 @@ def check_module_installed(module_name: str) -> bool:
         bool: 模块是否可导入
     """
     try:
-        # 使用 importlib.util.find_spec 检查模块是否存在
         spec = importlib.util.find_spec(module_name)
         return spec is not None
     except (ModuleNotFoundError, ImportError, ValueError):
         return False
 
 
-def get_missing_dependencies() -> List[Tuple[str, str, bool]]:
+def get_missing_dependencies(include_optional: bool = False) -> List[Tuple[str, str, bool]]:
     """获取缺失的依赖列表
+
+    Args:
+        include_optional: 是否包含可选依赖
 
     Returns:
         List[Tuple[str, str, bool]]: 缺失的依赖列表 (模块名, pip包名, 是否必需)
     """
     missing = []
+    core_deps, optional_deps = parse_pyproject_dependencies()
 
     # 检查核心依赖
-    for module_name, pip_name, required in CORE_DEPENDENCIES:
+    for module_name, pip_name, required in core_deps:
         if not check_module_installed(module_name):
             missing.append((module_name, pip_name, required))
 
-    # 检查平台专用依赖
-    if sys.platform == "win32":
-        for module_name, pip_name, required in WINDOWS_DEPENDENCIES:
-            if not check_module_installed(module_name):
-                missing.append((module_name, pip_name, required))
-    elif sys.platform == "darwin":
-        for module_name, pip_name, required in MACOS_DEPENDENCIES:
-            if not check_module_installed(module_name):
-                missing.append((module_name, pip_name, required))
+    # 检查可选依赖
+    if include_optional:
+        # 检查平台特定可选依赖
+        if sys.platform == "win32" and "windows" in optional_deps:
+            for module_name, pip_name, required in optional_deps["windows"]:
+                if not check_module_installed(module_name):
+                    missing.append((module_name, pip_name, required))
 
     return missing
 
@@ -234,7 +353,7 @@ def _install_cli(
         if required_failed:
             msg = f"必需依赖安装失败: {', '.join(required_failed)}"
             print(f"\n错误: {msg}")
-            print("请手动运行: pip install -r requirements.txt")
+            print("请手动运行: uv pip install -e . 或 pip install -e .")
             return False, msg
         else:
             msg = f"可选依赖安装失败: {', '.join(failed)}，但不影响核心功能"
