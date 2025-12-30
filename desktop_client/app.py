@@ -208,6 +208,13 @@ class DesktopClientApp(QObject):
         loop = QEventLoop(self._app)
         asyncio.set_event_loop(loop)
 
+        # 限制默认线程池大小,避免过多线程占用资源
+        from concurrent.futures import ThreadPoolExecutor
+
+        executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="qasync-worker")
+        loop.set_default_executor(executor)
+        logger.debug("已设置线程池(最大 4 个工作线程)")
+
         # 3. 初始化 GUI
         logger.debug("初始化 GUI")
         self._init_gui()
@@ -778,17 +785,34 @@ class DesktopClientApp(QObject):
 
     def _quit(self):
         """退出应用"""
+        # 创建协程任务执行异步清理
+        asyncio.ensure_future(self._async_quit())
+
+    async def _async_quit(self):
+        """异步清理资源并退出"""
+        # 1. 停止定时器和主动服务(同步)
         if self._proactive_service:
             self._proactive_service.stop()
             logger.debug("主动对话服务已停止")
 
         self._cancel_reconnect()
 
+        # 2. 清理快捷键(同步)
         if self._hotkey_manager:
             self._hotkey_manager.cleanup()
 
-        asyncio.ensure_future(self._bridge.disconnect_server())
+        # 3. 异步断开服务器连接(等待完成)
+        try:
+            await asyncio.wait_for(
+                self._bridge.disconnect_server(), timeout=5.0
+            )
+            logger.debug("服务器连接已断开")
+        except asyncio.TimeoutError:
+            logger.warning("断开服务器超时,强制退出")
+        except Exception as e:
+            logger.error(f"断开服务器失败: {e}")
 
+        # 4. 退出应用
         if self._app:
             self._app.quit()
 

@@ -73,9 +73,10 @@ class WebSocketClient:
     MAX_HIGH_LATENCY_COUNT = 3  # 连续高延迟次数阈值，超过则重连
 
     # 重连配置
-    BASE_RECONNECT_DELAY = 1  # 基础重连延迟（秒）
-    MAX_RECONNECT_DELAY = 60  # 最大重连延迟（秒）
-    RECONNECT_JITTER = 0.5  # 重连抖动因子（避免同时重连）
+    BASE_RECONNECT_DELAY = 1  # 基础重连延迟(秒)
+    MAX_RECONNECT_DELAY = 30  # 最大重连延迟(秒,从60降低到30)
+    RECONNECT_JITTER = 0.5  # 重连抖动因子(避免同时重连)
+    MAX_RECONNECT_ATTEMPTS = 10  # 最大重连次数限制(超过后降低频率)
 
     def __init__(
         self,
@@ -494,22 +495,61 @@ class WebSocketClient:
                         pass
                     self._pong_monitor_task = None
 
-            # 指数退避重连（带抖动）
+            # 指数退避重连(带抖动和次数限制)
             if self._running:
                 self._set_connection_state("reconnecting")
 
-                # 计算延迟：基础延迟 * 2^attempts + 随机抖动
-                base_delay = self.BASE_RECONNECT_DELAY * (
-                    2 ** min(reconnect_attempts, 6)
-                )  # 限制指数增长
-                jitter = random.uniform(0, self.RECONNECT_JITTER * base_delay)
-                delay = min(base_delay + jitter, self.MAX_RECONNECT_DELAY)
+                # 检查是否需要提前端口探测(超过5次失败)
+                if reconnect_attempts >= 5 and not await self._check_port_reachable():
+                    # 端口不可达,延长等待时间
+                    logger.warning(
+                        f"端口不可达,延长重连间隔(已失败 {reconnect_attempts} 次)"
+                    )
+                    delay = self.MAX_RECONNECT_DELAY
+                else:
+                    # 计算延迟: 基础延迟 * 2^attempts + 随机抖动
+                    base_delay = self.BASE_RECONNECT_DELAY * (
+                        2 ** min(reconnect_attempts, 6)
+                    )  # 限制指数增长
+                    jitter = random.uniform(0, self.RECONNECT_JITTER * base_delay)
+                    delay = min(base_delay + jitter, self.MAX_RECONNECT_DELAY)
 
                 reconnect_attempts += 1
-                logger.debug(
-                    f"将在 {delay:.1f} 秒后重连 (第 {reconnect_attempts} 次尝试，历史重连 {self._total_reconnects} 次)"
-                )
+
+                # 超过最大重连次数后,降低日志级别
+                if reconnect_attempts <= self.MAX_RECONNECT_ATTEMPTS:
+                    logger.debug(
+                        f"将在 {delay:.1f} 秒后重连 (第 {reconnect_attempts} 次尝试,历史重连 {self._total_reconnects} 次)"
+                    )
+                else:
+                    # 超过最大次数后,降低日志频率
+                    if reconnect_attempts % 5 == 0:
+                        logger.info(
+                            f"WebSocket 仍在后台重连 (已尝试 {reconnect_attempts} 次,间隔 {delay:.1f}s)"
+                        )
+
                 await asyncio.sleep(delay)
+
+    async def _check_port_reachable(self) -> bool:
+        """检查 WebSocket 端口是否可达"""
+        try:
+            import socket
+            from urllib.parse import urlparse
+
+            safe_url = self.url.split("?")[0] if "?" in self.url else self.url
+            parsed = urlparse(safe_url)
+            host = parsed.hostname
+            port = parsed.port or (443 if parsed.scheme == "wss" else 80)
+
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(2)
+            result = sock.connect_ex((host, port))
+            sock.close()
+
+            return result == 0
+        except Exception as e:
+            logger.debug(f"端口检测失败: {e}")
+            return False
 
     async def _heartbeat_loop(self):
         """应用层心跳循环 - 确保连接活跃，并监控连接质量"""
