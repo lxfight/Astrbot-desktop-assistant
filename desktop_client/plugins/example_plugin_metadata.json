@@ -1,0 +1,31 @@
+{
+  "name": "example_plugin",
+  "version": "1.0.0",
+  "author": "AstrBot Team",
+  "description": "示例插件,展示插件系统的使用方法",
+  "homepage": "https://github.com/muyouzhi6/Astrbot-desktop-assistant",
+  "license": "MIT",
+  "entry_point": "example_plugin.py",
+  "plugin_class": "ExamplePlugin",
+  "dependencies": [],
+  "min_app_version": "1.0.0",
+  "max_app_version": null,
+  "tags": ["example", "demo", "tutorial"],
+  "config_schema": {
+    "enable_message_counter": {
+      "type": "boolean",
+      "default": true,
+      "description": "是否启用消息计数器"
+    },
+    "enable_screenshot_notification": {
+      "type": "boolean",
+      "default": true,
+      "description": "是否启用截图通知"
+    },
+    "notification_duration": {
+      "type": "integer",
+      "default": 3,
+      "description": "通知显示时长(秒)"
+    }
+  }
+}

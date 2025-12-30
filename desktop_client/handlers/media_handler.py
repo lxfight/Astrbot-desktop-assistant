@@ -165,9 +165,7 @@ class MediaHandler(QObject):
         do_not_disturb = self._config.interaction.do_not_disturb
 
         # 检查是否正在等待响应（用户主动发起的对话）
-        (
-            self._floating_ball and self._floating_ball.is_waiting_response()
-        )
+        (self._floating_ball and self._floating_ball.is_waiting_response())
 
         # 判断是否需要静默处理 (优先使用传入参数，否则使用免打扰配置)
         should_silent = should_silent or do_not_disturb

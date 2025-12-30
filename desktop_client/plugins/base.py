@@ -7,9 +7,11 @@
 - PluginState: 插件状态枚举
 """
 
+import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -70,6 +72,14 @@ class PluginMetadata:
         default=None, metadata={"description": "最高兼容版本"}
     )
     tags: List[str] = field(default_factory=list, metadata={"description": "插件标签"})
+    entry_point: str = field(
+        default="__init__.py", metadata={"description": "插件入口文件"}
+    )
+    plugin_class: str = field(default="", metadata={"description": "插件主类名称"})
+    license: str = field(default="", metadata={"description": "开源许可证"})
+    config_schema: Dict[str, Any] = field(
+        default_factory=dict, metadata={"description": "配置项模式"}
+    )
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -83,6 +93,10 @@ class PluginMetadata:
             "min_app_version": self.min_app_version,
             "max_app_version": self.max_app_version,
             "tags": self.tags,
+            "entry_point": self.entry_point,
+            "plugin_class": self.plugin_class,
+            "license": self.license,
+            "config_schema": self.config_schema,
         }
 
     @classmethod
@@ -98,7 +112,18 @@ class PluginMetadata:
             min_app_version=data.get("min_app_version"),
             max_app_version=data.get("max_app_version"),
             tags=data.get("tags", []),
+            entry_point=data.get("entry_point", "__init__.py"),
+            plugin_class=data.get("plugin_class", ""),
+            license=data.get("license", ""),
+            config_schema=data.get("config_schema", {}),
         )
+
+    @classmethod
+    def from_json_file(cls, file_path: Path) -> "PluginMetadata":
+        """从 metadata.json 文件加载元数据"""
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return cls.from_dict(data)
 
 
 class IPlugin(ABC):

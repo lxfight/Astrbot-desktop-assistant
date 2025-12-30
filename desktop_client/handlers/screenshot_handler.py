@@ -63,7 +63,6 @@ class ScreenshotHandler(QObject):
     def do_region_screenshot(self) -> None:
         """区域截图"""
         try:
-
             # 隐藏窗口
             if self._floating_ball:
                 self._floating_ball.hide()
@@ -89,7 +88,6 @@ class ScreenshotHandler(QObject):
     def do_full_screenshot(self) -> None:
         """全屏截图"""
         try:
-
             # 隐藏窗口
             if self._floating_ball:
                 self._floating_ball.hide()
@@ -121,7 +119,6 @@ class ScreenshotHandler(QObject):
     def do_proactive_screenshot(self) -> None:
         """执行主动对话专用截图"""
         try:
-
             # 隐藏窗口
             if self._floating_ball:
                 self._floating_ball.hide()

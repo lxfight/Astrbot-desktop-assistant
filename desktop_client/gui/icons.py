@@ -13,7 +13,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-
 class IconManager:
     """图标管理器 - 单例模式"""
 

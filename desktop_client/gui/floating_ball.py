@@ -1398,7 +1398,9 @@ class CompactChatWindow(QWidget):
                     self._message_labels[msg.id] = label
         else:
             # 更新历史记录中的消息
-            self._chat_history.update_message(self._current_ai_message_id, self._current_ai_message)
+            self._chat_history.update_message(
+                self._current_ai_message_id, self._current_ai_message
+            )
             # 直接更新当前label
             if self._current_ai_label:
                 self._current_ai_label.set_markdown(self._current_ai_message)

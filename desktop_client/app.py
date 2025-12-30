@@ -538,7 +538,9 @@ class DesktopClientApp(QObject):
 
         # 启动定时更新检查（如果配置启用）
         if self.config.update.enabled and self.config.update.scheduled_times:
-            logger.debug(f"启动定时更新检查，时间点: {self.config.update.scheduled_times}")
+            logger.debug(
+                f"启动定时更新检查，时间点: {self.config.update.scheduled_times}"
+            )
             self._update_service.start_scheduled_checks()
 
         logger.debug("更新服务创建完成")
@@ -719,6 +721,7 @@ class DesktopClientApp(QObject):
 
             # 保存更新检查时间到配置
             from datetime import datetime
+
             self.config.update.last_check_time = datetime.now().isoformat()
             save_config(self.config)
 
@@ -793,6 +796,10 @@ class DesktopClientApp(QObject):
 def main():
     """入口函数"""
     import argparse
+    from .data_manager import init_data_structure
+
+    # 初始化数据目录结构(包含自动迁移)
+    init_data_structure(auto_migrate=True)
 
     parser = argparse.ArgumentParser(description="AstrBot Desktop Client")
     parser.add_argument("-s", "--server", help="Server URL")

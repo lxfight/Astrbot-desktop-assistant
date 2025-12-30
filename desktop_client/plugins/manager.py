@@ -91,27 +91,48 @@ class PluginManager:
     """
 
     def __init__(
-        self, plugins_dir: Optional[str] = None, config_dir: Optional[str] = None
+        self,
+        plugins_dir: Optional[str] = None,
+        config_dir: Optional[str] = None,
+        data_dir: Optional[str] = None,
     ):
         """
         初始化插件管理器
 
         Args:
-            plugins_dir: 插件目录路径
-            config_dir: 配置目录路径
+            plugins_dir: 插件代码目录路径
+            config_dir: 插件配置目录路径
+            data_dir: 插件数据目录路径
         """
-        # 目录配置
-        if plugins_dir is None:
-            plugins_dir = os.path.join(os.path.dirname(__file__), "installed")
-        self._plugins_dir = Path(plugins_dir)
+        # 使用新的数据目录结构
+        if plugins_dir is None or config_dir is None or data_dir is None:
+            try:
+                from ..data_manager import get_data_manager
 
-        if config_dir is None:
-            config_dir = os.path.join(os.path.dirname(__file__), "configs")
+                dm = get_data_manager()
+                if plugins_dir is None:
+                    plugins_dir = str(dm.plugins_installed_dir)
+                if config_dir is None:
+                    config_dir = str(dm.plugins_config_dir)
+                if data_dir is None:
+                    data_dir = str(dm.plugins_data_dir)
+            except Exception:
+                # 回退到旧路径
+                if plugins_dir is None:
+                    plugins_dir = os.path.join(os.path.dirname(__file__), "installed")
+                if config_dir is None:
+                    config_dir = os.path.join(os.path.dirname(__file__), "configs")
+                if data_dir is None:
+                    data_dir = os.path.join(os.path.dirname(__file__), "data")
+
+        self._plugins_dir = Path(plugins_dir)
         self._config_dir = Path(config_dir)
+        self._data_dir = Path(data_dir)
 
         # 确保目录存在
         self._plugins_dir.mkdir(parents=True, exist_ok=True)
         self._config_dir.mkdir(parents=True, exist_ok=True)
+        self._data_dir.mkdir(parents=True, exist_ok=True)
 
         # 插件存储
         self._plugins: Dict[str, IPlugin] = {}
@@ -128,14 +149,33 @@ class PluginManager:
         # 已启用的插件（用于持久化）
         self._enabled_plugins: Set[str] = set()
 
-        logger.info(f"插件管理器初始化: plugins_dir={self._plugins_dir}")
+        logger.info(
+            f"插件管理器初始化: plugins_dir={self._plugins_dir}, "
+            f"config_dir={self._config_dir}, data_dir={self._data_dir}"
+        )
 
     # ==================== 属性 ====================
 
     @property
     def plugins_dir(self) -> Path:
-        """获取插件目录"""
+        """获取插件代码目录"""
         return self._plugins_dir
+
+    @property
+    def config_dir(self) -> Path:
+        """获取插件配置目录"""
+        return self._config_dir
+
+    @property
+    def data_dir(self) -> Path:
+        """获取插件数据根目录"""
+        return self._data_dir
+
+    def get_plugin_data_dir(self, plugin_name: str) -> Path:
+        """获取指定插件的数据目录"""
+        plugin_data_dir = self._data_dir / plugin_name
+        plugin_data_dir.mkdir(parents=True, exist_ok=True)
+        return plugin_data_dir
 
     @property
     def plugins(self) -> Dict[str, IPlugin]:

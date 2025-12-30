@@ -585,15 +585,23 @@ WriteLog "========== Autostart script completed =========="
                                 )
                                 # 尝试重新创建 VBS 文件
                                 try:
-                                    self._create_silent_launcher(self._get_project_root())
+                                    self._create_silent_launcher(
+                                        self._get_project_root()
+                                    )
                                     if vbs_path.exists():
-                                        logger.info(f"[Windows] VBS 启动器已重新创建: {vbs_path}")
+                                        logger.info(
+                                            f"[Windows] VBS 启动器已重新创建: {vbs_path}"
+                                        )
                                         return True
                                     else:
-                                        logger.error(f"[Windows] VBS 启动器重新创建失败")
+                                        logger.error(
+                                            f"[Windows] VBS 启动器重新创建失败"
+                                        )
                                         return False
                                 except Exception as e:
-                                    logger.error(f"[Windows] 重新创建 VBS 启动器失败: {e}")
+                                    logger.error(
+                                        f"[Windows] 重新创建 VBS 启动器失败: {e}"
+                                    )
                                     return False
                     return True
                 return False

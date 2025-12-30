@@ -960,9 +960,7 @@ class AstrBotApiClient:
                     ws_connected = self._ws_connection_state == "connected"
 
                     if ws_connected:
-                        print(
-                            "[API Client] HTTP 检测失败但 WebSocket 仍连接，暂不断开"
-                        )
+                        print("[API Client] HTTP 检测失败但 WebSocket 仍连接，暂不断开")
                         # WebSocket 正常时，使用更宽松的失败阈值
                         effective_max_failures = self._max_health_check_failures * 2
                     else:

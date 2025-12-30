@@ -450,9 +450,7 @@ class WebSocketClient:
 
                     if result == 0:
                         logger.warning(f"  ⚠️ 端口 {port} 可达，但 WebSocket 握手失败")
-                        logger.warning(
-                            "     这通常表示服务端未正确配置 WebSocket 支持"
-                        )
+                        logger.warning("     这通常表示服务端未正确配置 WebSocket 支持")
                     else:
                         logger.error(f"  ❌ 端口 {port} 不可达（连接被拒绝）")
                 except Exception:

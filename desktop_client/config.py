@@ -11,6 +11,9 @@ from dataclasses import dataclass, field, asdict
 from typing import Optional
 from pathlib import Path
 
+# 是否使用新的 data 目录结构
+_use_data_dir: bool = True
+
 
 @dataclass
 class ServerConfig:
@@ -216,10 +219,16 @@ class StorageConfig:
             except Exception as e:
                 print(f"无法创建自定义存储目录: {e}")
 
-        # 默认路径: ./temp/images
-        default_path = Path("temp") / "images"
-        default_path.mkdir(parents=True, exist_ok=True)
-        return default_path
+        # 默认路径: data/temp/images 或 ./temp/images
+        global _use_data_dir
+        if _use_data_dir:
+            from .data_manager import get_data_manager
+
+            return get_data_manager().images_dir
+        else:
+            default_path = Path("temp") / "images"
+            default_path.mkdir(parents=True, exist_ok=True)
+            return default_path
 
     @property
     def resolved_chat_history_path(self) -> Path:
@@ -232,10 +241,15 @@ class StorageConfig:
             except Exception as e:
                 print(f"无法创建聊天记录目录: {e}")
 
-        # 默认路径: 配置目录下的 chat_history.json
-        # 使用与 ClientConfig.get_config_dir() 相同的逻辑获取配置目录
-        config_dir = _get_config_dir_internal()
-        return config_dir / "chat_history.json"
+        # 默认路径: data/chat_history.json 或配置目录下的 chat_history.json
+        global _use_data_dir
+        if _use_data_dir:
+            from .data_manager import get_data_manager
+
+            return get_data_manager().chat_history_file
+        else:
+            config_dir = _get_config_dir_internal()
+            return config_dir / "chat_history.json"
 
 
 @dataclass
@@ -329,21 +343,27 @@ class ClientConfig:
     def get_config_dir(cls) -> Path:
         """获取配置文件目录
 
-        优先级：
-        - Windows: %APPDATA%/AstrBotDesktopClient
-        - macOS: ~/Library/Application Support/AstrBotDesktopClient
-        - Linux: ~/.config/astrbot-desktop-client
-
-        如果创建失败，回退到项目目录下的 config 文件夹
-
-        注意：复用 _get_config_dir_internal() 避免代码重复
+        新版本:使用 data 目录结构
+        旧版本兼容:使用平台配置目录
         """
-        return _get_config_dir_internal()
+        global _use_data_dir
+        if _use_data_dir:
+            from .data_manager import get_data_manager
+
+            return get_data_manager().data_dir
+        else:
+            return _get_config_dir_internal()
 
     @classmethod
     def get_config_path(cls) -> Path:
         """获取配置文件路径"""
-        return cls.get_config_dir() / "config.json"
+        global _use_data_dir
+        if _use_data_dir:
+            from .data_manager import get_data_manager
+
+            return get_data_manager().config_file
+        else:
+            return cls.get_config_dir() / "config.json"
 
     @classmethod
     def load(cls, config_path: Optional[str] = None) -> "ClientConfig":

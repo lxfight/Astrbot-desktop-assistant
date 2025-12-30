@@ -31,8 +31,12 @@ if __name__ == "__main__":
     import logging
     from desktop_client.logger import configure_root_logger
     from desktop_client.config import ClientConfig
+    from desktop_client.data_manager import init_data_structure
 
-    # 配置日志系统（仅在直接运行 main.py 时需要）
+    # 初始化数据目录结构并自动迁移旧数据
+    init_data_structure(auto_migrate=True)
+
+    # 配置日志系统
     config_dir = ClientConfig.get_config_dir()
     log_file = os.path.join(config_dir, "logs", "desktop_client.log")
 

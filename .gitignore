@@ -157,3 +157,4 @@ $RECYCLE.BIN/
 *.lnk
 CLAUDE.md
 .claude/
+data/

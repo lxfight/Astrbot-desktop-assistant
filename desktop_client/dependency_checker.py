@@ -222,13 +222,15 @@ def _install_cli(
             "success": "成功",
             "failed": "失败",
         }.get(status, status)
-        print(f"  [{i+1}/{total}] {name}: {status_text}")
+        print(f"  [{i + 1}/{total}] {name}: {status_text}")
 
     success, failed = install_missing_dependencies(all_missing, progress)
 
     if failed:
         # 检查是否有必需依赖安装失败
-        required_failed = [f for f in failed if any(f == p for _, p, r in required if r)]
+        required_failed = [
+            f for f in failed if any(f == p for _, p, r in required if r)
+        ]
         if required_failed:
             msg = f"必需依赖安装失败: {', '.join(required_failed)}"
             print(f"\n错误: {msg}")
@@ -309,7 +311,9 @@ def _install_with_gui(
         success, failed = install_missing_dependencies(all_missing, update_progress)
 
         if failed:
-            required_failed = [f for f in failed if any(f == p for _, p, r in required if r)]
+            required_failed = [
+                f for f in failed if any(f == p for _, p, r in required if r)
+            ]
             if required_failed:
                 result["success"] = False
                 result["message"] = f"必需依赖安装失败: {', '.join(required_failed)}"

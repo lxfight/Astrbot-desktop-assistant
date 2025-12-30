@@ -90,9 +90,7 @@ class MessageHandler(QObject):
         do_not_disturb = self._config.interaction.do_not_disturb
 
         # 检查是否正在等待响应（用户主动发起的对话）
-        (
-            self._floating_ball and self._floating_ball.is_waiting_response()
-        )
+        (self._floating_ball and self._floating_ball.is_waiting_response())
 
         # 判断是否需要静默处理（免打扰模式）
         should_silent = do_not_disturb
