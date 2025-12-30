@@ -803,9 +803,7 @@ class DesktopClientApp(QObject):
 
         # 3. 异步断开服务器连接(等待完成)
         try:
-            await asyncio.wait_for(
-                self._bridge.disconnect_server(), timeout=5.0
-            )
+            await asyncio.wait_for(self._bridge.disconnect_server(), timeout=5.0)
             logger.debug("服务器连接已断开")
         except asyncio.TimeoutError:
             logger.warning("断开服务器超时,强制退出")

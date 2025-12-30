@@ -462,7 +462,7 @@ WriteLog "========== Autostart script completed =========="
                 f.write(f"Python路径: {python_path}\n")
                 f.write(f"VBS脚本: {vbs_path}\n")
                 f.write(f"创建时间: {__import__('datetime').datetime.now()}\n")
-                f.write(f"VBS版本: 2.0 (增强路径检测)\n")
+                f.write("VBS版本: 2.0 (增强路径检测)\n")
 
         except Exception as e:
             logger.error(f"[Windows] 创建启动器失败: {e}")
@@ -595,7 +595,7 @@ WriteLog "========== Autostart script completed =========="
                                         return True
                                     else:
                                         logger.error(
-                                            f"[Windows] VBS 启动器重新创建失败"
+                                            "[Windows] VBS 启动器重新创建失败"
                                         )
                                         return False
                                 except Exception as e:

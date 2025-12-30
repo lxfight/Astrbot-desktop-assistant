@@ -24,7 +24,9 @@ PACKAGE_TO_MODULE = {
 }
 
 
-def parse_pyproject_dependencies() -> Tuple[List[Tuple[str, str, bool]], Dict[str, List[Tuple[str, str, bool]]]]:
+def parse_pyproject_dependencies() -> Tuple[
+    List[Tuple[str, str, bool]], Dict[str, List[Tuple[str, str, bool]]]
+]:
     """从 pyproject.toml 解析依赖
 
     Returns:
@@ -64,7 +66,9 @@ def parse_pyproject_dependencies() -> Tuple[List[Tuple[str, str, bool]], Dict[st
             for group_name, deps in data["project"]["optional-dependencies"].items():
                 group_deps = []
                 for dep_spec in deps:
-                    module_name, pip_name, required = _parse_dependency_spec(dep_spec, required=False)
+                    module_name, pip_name, required = _parse_dependency_spec(
+                        dep_spec, required=False
+                    )
                     if module_name:
                         group_deps.append((module_name, pip_name, required))
                 optional_deps[group_name] = group_deps
@@ -76,7 +80,9 @@ def parse_pyproject_dependencies() -> Tuple[List[Tuple[str, str, bool]], Dict[st
         return _get_fallback_dependencies()
 
 
-def _parse_dependency_spec(dep_spec: str, required: bool = True) -> Tuple[Optional[str], str, bool]:
+def _parse_dependency_spec(
+    dep_spec: str, required: bool = True
+) -> Tuple[Optional[str], str, bool]:
     """解析单个依赖规范
 
     Args:
@@ -111,7 +117,10 @@ def _parse_dependency_spec(dep_spec: str, required: bool = True) -> Tuple[Option
                 # 提取版本号，如 "python_version < '3.11'" -> (3, 11)
                 version_match = re.search(r"['\"](\d+)\.(\d+)['\"]", marker_part)
                 if version_match:
-                    target_version = (int(version_match.group(1)), int(version_match.group(2)))
+                    target_version = (
+                        int(version_match.group(1)),
+                        int(version_match.group(2)),
+                    )
                     if "<" in marker_part and ">=" not in marker_part:
                         if not (py_version < target_version):
                             return None, dep_spec, required
@@ -138,7 +147,9 @@ def _parse_dependency_spec(dep_spec: str, required: bool = True) -> Tuple[Option
     return module_name, dep_spec, required
 
 
-def _get_fallback_dependencies() -> Tuple[List[Tuple[str, str, bool]], Dict[str, List[Tuple[str, str, bool]]]]:
+def _get_fallback_dependencies() -> Tuple[
+    List[Tuple[str, str, bool]], Dict[str, List[Tuple[str, str, bool]]]
+]:
     """回退依赖列表（当 pyproject.toml 不可用时使用）"""
     core_deps = [
         ("PySide6", "PySide6>=6.5.0", True),
@@ -184,7 +195,9 @@ def check_module_installed(module_name: str) -> bool:
         return False
 
 
-def get_missing_dependencies(include_optional: bool = False) -> List[Tuple[str, str, bool]]:
+def get_missing_dependencies(
+    include_optional: bool = False,
+) -> List[Tuple[str, str, bool]]:
     """获取缺失的依赖列表
 
     Args:
