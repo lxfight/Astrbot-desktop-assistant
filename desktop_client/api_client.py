@@ -1692,6 +1692,8 @@ class AstrBotApiClient:
 
                 # 手动处理 SSE 流
                 logger.debug("[SSE] 开始处理 SSE 流")
+                terminal_received = False
+                event_received = False
                 async for line in response.aiter_lines():
                     if not line:
                         continue
@@ -1700,9 +1702,17 @@ class AstrBotApiClient:
                     if line.startswith("\ufeff"):
                         line = line[1:]
 
-                    # 只处理 data: 开头的行
-                    if line.startswith("data: "):
-                        data_str = line[6:]  # 去掉 'data: ' 前缀
+                    # 忽略 SSE 注释/心跳
+                    if line.startswith(":"):
+                        continue
+
+                    # 只处理 data: 开头的行，兼容 data: xxx 和 data:xxx
+                    if line.startswith("data:"):
+                        data_str = line[5:].lstrip()
+                        if data_str == "[DONE]":
+                            terminal_received = True
+                            yield SSEEvent(event_type="end", data="")
+                            return
 
                         try:
                             event_data = json.loads(data_str)
@@ -1719,16 +1729,23 @@ class AstrBotApiClient:
                                 raw=event_data,
                             )
                             logger.debug(f"[SSE] 收到事件: type={event_type}, streaming={event.streaming}, data_len={len(event.data)}")
+                            event_received = True
                             yield event
 
                             # 让出控制权 - 关键！
                             await asyncio.sleep(0)
 
+                            if event.event_type in ("end", "complete", "break", "error"):
+                                terminal_received = True
                             if event.event_type == "end":
                                 return
                         except json.JSONDecodeError:
                             logger.warning(f"[SSE] JSON 解析失败: {data_str[:100]}")
                             continue
+
+                if event_received and not terminal_received:
+                    logger.debug("[SSE] 流结束但未收到终止事件，补发 end")
+                    yield SSEEvent(event_type="end", data="")
 
         except httpx.ConnectError as e:
             logger.error(f"[SSE] 连接失败: {e}")

@@ -51,53 +51,38 @@ set "CLONE_URL=%GITHUB_REPO%"
 set "BEST_PROXY="
 
 :: ============================================================================
-:: Auto-test proxy latency (using ping)
+:: Auto-test proxy availability using the real Git smart-HTTP endpoint
 :: ============================================================================
 if "!USE_PROXY!"=="1" (
     echo.
-    set "MIN_TIME=9999"
-    
+    set "CLONE_URLS="
+
     for %%H in (%PROXY_HOSTS%) do (
         echo   Testing %%H ...
-        
-        :: Use ping to test, extract average latency
-        for /f "tokens=*" %%R in ('ping -n 1 -w 3000 %%H 2^>nul ^| findstr /i "Average"') do (
-            set "PING_RESULT=%%R"
-        )
-        
-        :: Extract latency value
-        set "LATENCY=9999"
-        for /f "tokens=*" %%L in ('ping -n 1 -w 3000 %%H 2^>nul ^| findstr /i "time=" ^| findstr /r "[0-9]*ms"') do (
-            for /f "tokens=2 delims==" %%T in ("%%L") do (
-                for /f "tokens=1 delims=m" %%M in ("%%T") do (
-                    set "LATENCY=%%M"
-                )
-            )
-        )
-        
-        :: Fallback: check if ping succeeds
-        ping -n 1 -w 3000 %%H >nul 2>&1
+
+        set "PROXY_CLONE_URL=https://%%H/!GITHUB_REPO!"
+        set "PROXY_PROBE_URL=https://%%H/!GITHUB_REPO!/info/refs?service=git-upload-pack"
+        powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $ProgressPreference = 'SilentlyContinue'; $response = Invoke-WebRequest -UseBasicParsing -Uri $env:PROXY_PROBE_URL -Method Get -TimeoutSec 8; if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500) { exit 0 }; exit 1 } catch { exit 1 }" >nul 2>&1
         if !ERRORLEVEL! EQU 0 (
-            if !LATENCY! LSS !MIN_TIME! (
-                set "MIN_TIME=!LATENCY!"
+            if not defined BEST_PROXY (
                 set "BEST_PROXY=%%H"
-                echo     + Available - !LATENCY! ms
-            ) else (
-                echo     + Available
+                set "CLONE_URL=!PROXY_CLONE_URL!"
             )
+            set "CLONE_URLS=!CLONE_URLS! !PROXY_CLONE_URL!"
+            echo     + Available
         ) else (
             echo     X Unavailable
         )
     )
-    
+
     if defined BEST_PROXY (
         echo.
-        echo + Selected fastest proxy: !BEST_PROXY!
-        set "CLONE_URL=https://!BEST_PROXY!/!GITHUB_REPO!"
+        echo + Selected proxy: !BEST_PROXY!
     ) else (
         echo.
-        echo ! All proxies unavailable, trying direct connection
-        set "CLONE_URL=%GITHUB_REPO%"
+        echo X All proxies unavailable.
+        echo   You selected proxy mode, so direct GitHub will not be used automatically.
+        echo   Please choose option 1 if your network can access GitHub directly.
     )
 )
 
@@ -227,20 +212,47 @@ if exist "!PROJECT_DIR!" (
 )
 
 echo Downloading project using shallow clone...
-echo Download URL: !CLONE_URL!
 echo.
 
-git clone --depth 1 "!CLONE_URL!" "!PROJECT_DIR!"
+set "CLONE_OK=0"
 
-if !ERRORLEVEL! NEQ 0 (
-    echo.
-    echo ! Download failed, trying direct GitHub connection...
-    git clone --depth 1 "%GITHUB_REPO%" "!PROJECT_DIR!"
-    
+if "!USE_PROXY!"=="1" (
+    if not defined CLONE_URLS (
+        echo X No verified proxy is available. Download aborted.
+        pause
+        exit /b 1
+    )
+
+    for %%U in (!CLONE_URLS!) do (
+        if "!CLONE_OK!"=="0" (
+            if exist "!PROJECT_DIR!" (
+                rmdir /s /q "!PROJECT_DIR!" 2>nul
+            )
+            echo Download URL: %%U
+            git clone --depth 1 "%%U" "!PROJECT_DIR!"
+            if !ERRORLEVEL! EQU 0 (
+                set "CLONE_OK=1"
+            ) else (
+                echo ! Download failed with this proxy, trying next verified proxy...
+            )
+        )
+    )
+
+    if "!CLONE_OK!"=="0" (
+        echo X Download failed through all verified proxies.
+        echo   Direct GitHub fallback is skipped because proxy mode was selected.
+        pause
+        exit /b 1
+    )
+) else (
+    echo Download URL: !CLONE_URL!
+    git clone --depth 1 "!CLONE_URL!" "!PROJECT_DIR!"
     if !ERRORLEVEL! NEQ 0 (
         echo X Download failed. Please check network connection.
         pause
         exit /b 1
+    ) else (
+        set "CLONE_OK=1"
     )
 )
 

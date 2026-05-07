@@ -447,6 +447,50 @@ class TestMessageBridgeSSEEventHandling:
             assert len(received_messages) == 0
 
     @pytest.mark.unit
+    def test_handle_tool_call_chain_types_skipped(
+        self, mock_qt_app, sample_config: ClientConfig
+    ):
+        """测试跳过工具调用和工具返回事件"""
+        with patch("desktop_client.bridge.AstrBotApiClient"):
+            bridge = MessageBridge(sample_config)
+
+            received_messages = []
+            bridge.message_received.connect(lambda msg: received_messages.append(msg))
+
+            for chain_type in ("tool_call", "tool_call_result", "agent_stats"):
+                bridge._handle_sse_event(
+                    SSEEvent(
+                        event_type="plain",
+                        data='{"id":"call_123","result":"secret"}',
+                        chain_type=chain_type,
+                    ),
+                    "session_123",
+                )
+
+            assert received_messages == []
+
+    @pytest.mark.unit
+    def test_handle_tool_result_payload_skipped_even_without_chain_type(
+        self, mock_qt_app, sample_config: ClientConfig
+    ):
+        """测试旧版服务端未标记 chain_type 时仍跳过工具返回载荷"""
+        with patch("desktop_client.bridge.AstrBotApiClient"):
+            bridge = MessageBridge(sample_config)
+
+            received_messages = []
+            bridge.message_received.connect(lambda msg: received_messages.append(msg))
+
+            event = SSEEvent(
+                event_type="plain",
+                data='{"id":"call_123","ts":1234567890,"result":"工具返回值"}',
+                streaming=False,
+            )
+
+            bridge._handle_sse_event(event, "session_123")
+
+            assert received_messages == []
+
+    @pytest.mark.unit
     def test_handle_regular_structured_text_not_skipped(
         self, mock_qt_app, sample_config: ClientConfig
     ):

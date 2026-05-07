@@ -265,9 +265,14 @@ class MessageBridge(QObject):
             if not event.data and not event.streaming:
                 return  # 跳过空的非流式消息
 
-            # Bug 3 修复：跳过 reasoning 类型的思维链内容
-            if event.chain_type == "reasoning":
-                return  # 不显示思维链内容
+            # 跳过不应展示给用户的中间链路内容
+            if event.chain_type in {
+                "reasoning",
+                "tool_call",
+                "tool_call_result",
+                "agent_stats",
+            }:
+                return
 
             content = event.data
 
@@ -435,7 +440,16 @@ class MessageBridge(QObject):
         if isinstance(data, dict):
             id_value = str(data.get("id", ""))
             if id_value.startswith("call_") and (
-                "name" in data or "args" in data or "arguments" in data
+                "name" in data
+                or "args" in data
+                or "arguments" in data
+                or "result" in data
+            ):
+                return True
+            if (
+                "id" in data
+                and "result" in data
+                and ("ts" in data or "finished_ts" in data)
             ):
                 return True
             if data.get("type") == "function":

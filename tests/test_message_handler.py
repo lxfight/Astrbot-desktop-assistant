@@ -61,6 +61,40 @@ class TestMessageHandler:
         assert ("stream", "流式片段", {}) in floating_ball.calls
 
     @pytest.mark.unit
+    def test_new_request_finishes_stale_active_response(self, sample_config):
+        floating_ball = FakeFloatingBall(visible=True, active=False)
+        handler = MessageHandler(
+            config=sample_config,
+            floating_ball=floating_ball,
+            chat_history_manager=MagicMock(),
+        )
+
+        handler.handle_output_message(
+            OutputMessage(
+                msg_type="text",
+                content="第一段",
+                session_id="session_123",
+                streaming=True,
+                metadata={"request_id": "req_1"},
+            )
+        )
+        handler.handle_output_message(
+            OutputMessage(
+                msg_type="text",
+                content="第二段",
+                session_id="session_123",
+                streaming=True,
+                metadata={"request_id": "req_2"},
+            )
+        )
+
+        assert floating_ball.calls == [
+            ("stream", "第一段", {"request_id": "req_1"}),
+            ("finish",),
+            ("stream", "第二段", {"request_id": "req_2"}),
+        ]
+
+    @pytest.mark.unit
     def test_end_message_finishes_active_response_and_marks_unread_when_hidden(
         self, sample_config
     ):

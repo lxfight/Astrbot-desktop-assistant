@@ -181,6 +181,57 @@ class TestAstrBotApiClientOpenApiMode:
         assert "session_id" not in kwargs["json"]
         http_client.aclose.assert_awaited_once()
 
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_send_message_accepts_data_without_space_and_done_marker(self):
+        client = AstrBotApiClient(
+            "http://localhost:6185",
+            username="alice",
+            api_key="abk_test",
+        )
+        response = _FakeSseResponse(
+            200,
+            [
+                ": heartbeat",
+                'data:{"type":"plain","data":"hello","streaming":true}',
+                "data: [DONE]",
+            ],
+        )
+        http_client = MagicMock()
+        http_client.stream = MagicMock(return_value=_FakeSseContext(response))
+        http_client.aclose = AsyncMock()
+        client._create_sse_client = MagicMock(return_value=http_client)
+
+        events = []
+        async for event in client.send_message("session_001", "hi"):
+            events.append(event)
+
+        assert [event.event_type for event in events] == ["plain", "end"]
+        assert events[0].data == "hello"
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_send_message_adds_end_when_stream_closes_without_terminal_event(self):
+        client = AstrBotApiClient(
+            "http://localhost:6185",
+            username="alice",
+            api_key="abk_test",
+        )
+        response = _FakeSseResponse(
+            200,
+            ['data: {"type":"plain","data":"hello","streaming":true}'],
+        )
+        http_client = MagicMock()
+        http_client.stream = MagicMock(return_value=_FakeSseContext(response))
+        http_client.aclose = AsyncMock()
+        client._create_sse_client = MagicMock(return_value=http_client)
+
+        events = []
+        async for event in client.send_message("session_001", "hi"):
+            events.append(event)
+
+        assert [event.event_type for event in events] == ["plain", "end"]
+
 
 class TestAstrBotApiClientSSEDataNormalization:
     @pytest.mark.unit

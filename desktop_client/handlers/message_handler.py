@@ -54,6 +54,7 @@ class MessageHandler(QObject):
         self._streaming_response_buffer = ""
         self._silent_response_metadata: dict = {}
         self._streaming_response_metadata: dict = {}
+        self._active_response_request_id: Optional[str] = None
 
     def set_floating_ball(self, floating_ball: Any) -> None:
         """设置悬浮球实例"""
@@ -181,6 +182,9 @@ class MessageHandler(QObject):
         if content.strip() in ["[收到语音]", "🔊 [收到语音]"]:
             return
 
+        if not (is_proactive_response or should_silent):
+            self._ensure_response_request_scope(message_metadata)
+
         # 主动对话响应或静默模式：静默处理，不弹窗
         if is_proactive_response or should_silent:
             if streaming:
@@ -252,6 +256,7 @@ class MessageHandler(QObject):
 
             self._streaming_response_buffer = ""
             self._streaming_response_metadata = {}
+            self._active_response_request_id = None
 
     def _handle_end_message(
         self, is_proactive_response: bool, should_silent: bool
@@ -297,6 +302,7 @@ class MessageHandler(QObject):
 
         self._streaming_response_buffer = ""
         self._streaming_response_metadata = {}
+        self._active_response_request_id = None
 
     def _handle_error_message(
         self, content: str, is_proactive_response: bool, should_silent: bool
@@ -311,6 +317,7 @@ class MessageHandler(QObject):
             self._streaming_response_buffer = ""
             self._silent_response_metadata = {}
             self._streaming_response_metadata = {}
+            self._active_response_request_id = None
 
             # 如果是用户等待中（但被静默了），需要重置等待状态
             if self._floating_ball and self._has_active_response():
@@ -323,6 +330,7 @@ class MessageHandler(QObject):
 
         self._streaming_response_buffer = ""
         self._streaming_response_metadata = {}
+        self._active_response_request_id = None
 
         if self._floating_ball:
             # 如果气泡输入框在等待，也需要结束等待并显示错误
@@ -420,6 +428,32 @@ class MessageHandler(QObject):
         if incoming_metadata:
             merged.update(incoming_metadata)
         return merged
+
+    def _ensure_response_request_scope(
+        self, message_metadata: Optional[dict]
+    ) -> None:
+        """避免缺失结束事件时将新请求继续写入旧气泡。"""
+        request_id = self._get_request_id(message_metadata)
+        if not request_id:
+            return
+
+        if (
+            self._active_response_request_id
+            and self._active_response_request_id != request_id
+        ):
+            if self._floating_ball and self._has_active_response():
+                self._floating_ball.finish_response()
+            self._streaming_response_buffer = ""
+            self._streaming_response_metadata = {}
+
+        self._active_response_request_id = request_id
+
+    @staticmethod
+    def _get_request_id(message_metadata: Optional[dict]) -> Optional[str]:
+        if not isinstance(message_metadata, dict):
+            return None
+        request_id = message_metadata.get("request_id")
+        return str(request_id) if request_id else None
 
     def _has_active_response(self) -> bool:
         """检查当前是否有未收尾的前台响应。"""
