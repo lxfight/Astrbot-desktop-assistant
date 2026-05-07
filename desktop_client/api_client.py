@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import time
+import uuid
 import warnings
 from dataclasses import dataclass
 from enum import Enum
@@ -868,6 +869,8 @@ class AstrBotApiClient:
         server_url: str,
         username: str = "",
         password: str = "",
+        api_key: str = "",
+        auth_mode: str = "openapi",
         token: Optional[str] = None,
         timeout: int = 30,
         on_state_change: Optional[Callable[[ConnectionState], None]] = None,
@@ -875,6 +878,8 @@ class AstrBotApiClient:
         self.server_url = server_url.rstrip("/")
         self.username = username
         self.password = password
+        self.api_key = api_key
+        self.auth_mode = auth_mode
         self.token = token
         self.timeout = timeout
         self.on_state_change = on_state_change
@@ -950,15 +955,32 @@ class AstrBotApiClient:
     def api_base(self) -> str:
         return f"{self.server_url}/api"
 
+    @property
+    def openapi_base(self) -> str:
+        return f"{self.server_url}/api/v1"
+
+    @property
+    def uses_openapi(self) -> bool:
+        return bool(self.api_key) and self.auth_mode != "legacy"
+
     def _get_headers(self) -> dict:
         """获取请求头"""
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
-        if self.token:
+        if self.uses_openapi:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        elif self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         return headers
+
+    def _get_multipart_headers(self) -> dict:
+        if self.uses_openapi:
+            return {"Authorization": f"Bearer {self.api_key}"}
+        if self.token:
+            return {"Authorization": f"Bearer {self.token}"}
+        return {}
 
     async def _ensure_client(self) -> httpx.AsyncClient:
         """确保 HTTP 客户端已创建（单例复用）"""
@@ -1114,16 +1136,28 @@ class AstrBotApiClient:
         Returns:
             bool: HTTP 连接是否健康
         """
-        if not self.token:
+        if not self.uses_openapi and not self.token:
             return False
 
         try:
             client = await self._ensure_client()
-            response = await client.get(
-                f"{self.api_base}/chat/sessions",
-                headers=self._get_headers(),
-                timeout=10.0,
-            )
+            if self.uses_openapi:
+                response = await client.get(
+                    f"{self.openapi_base}/chat/sessions",
+                    params={
+                        "username": self.username or "astrbot",
+                        "page": 1,
+                        "page_size": 1,
+                    },
+                    headers=self._get_headers(),
+                    timeout=10.0,
+                )
+            else:
+                response = await client.get(
+                    f"{self.api_base}/chat/sessions",
+                    headers=self._get_headers(),
+                    timeout=10.0,
+                )
 
             if response.status_code == 200:
                 data = response.json()
@@ -1131,7 +1165,7 @@ class AstrBotApiClient:
                     return True
 
             # 401 表示 token 过期
-            if response.status_code == 401:
+            if response.status_code == 401 and not self.uses_openapi:
                 logger.debug("⚠️ Token 已过期，需要重新登录")
                 self.token = None
 
@@ -1194,6 +1228,13 @@ class AstrBotApiClient:
         """
         self.state = ConnectionState.CONNECTING
 
+        if self.uses_openapi:
+            ok = await self.check_connection()
+            if ok:
+                await self.start_health_check()
+                return True, "OpenAPI 连接成功"
+            return False, "OpenAPI API Key 验证失败"
+
         username = username or self.username
         password = password or self.password
 
@@ -1251,42 +1292,18 @@ class AstrBotApiClient:
 
     async def check_connection(self) -> bool:
         """检查连接状态"""
-        if not self.token:
+        if not self.uses_openapi and not self.token:
             return False
 
-        try:
-            client = await self._ensure_client()
-            # 尝试获取会话列表来验证 token 是否有效
-            response = await client.get(
-                f"{self.api_base}/chat/sessions",
-                headers=self._get_headers(),
-                timeout=10.0,  # 健康检测使用较短超时
-            )
+        is_healthy = await self._check_http_connection()
+        if is_healthy:
+            if self._state != ConnectionState.CONNECTED:
+                self.state = ConnectionState.CONNECTED
+            self._last_successful_request = time.time()
+            return True
 
-            if response.status_code == 200:
-                data = response.json()
-                if data.get("status") == "ok":
-                    if self._state != ConnectionState.CONNECTED:
-                        self.state = ConnectionState.CONNECTED
-                    self._last_successful_request = time.time()
-                    return True
-
-            # 401 表示 token 过期，需要重新登录
-            if response.status_code == 401:
-                logger.debug("⚠️ Token 已过期，需要重新登录")
-                self.token = None
-
-            self.state = ConnectionState.DISCONNECTED
-            return False
-
-        except httpx.TimeoutException:
-            logger.debug("⚠️ 连接检测超时")
-            self.state = ConnectionState.DISCONNECTED
-            return False
-        except Exception as e:
-            logger.debug(f"⚠️ 连接检测异常: {e}")
-            self.state = ConnectionState.DISCONNECTED
-            return False
+        self.state = ConnectionState.DISCONNECTED
+        return False
 
     async def start_websocket(
         self,
@@ -1350,6 +1367,9 @@ class AstrBotApiClient:
         Returns:
             (success, session_id or error_message)
         """
+        if self.uses_openapi:
+            return True, f"desktop_{uuid.uuid4().hex}"
+
         try:
             client = await self._ensure_client()
 
@@ -1386,14 +1406,23 @@ class AstrBotApiClient:
             client = await self._ensure_client()
 
             params = {}
-            if platform_id:
+            if platform_id and not self.uses_openapi:
                 params["platform_id"] = platform_id
-
-            response = await client.get(
-                f"{self.api_base}/chat/sessions",
-                params=params,
-                headers=self._get_headers(),
+            if self.uses_openapi:
+                params.update(
+                    {
+                        "username": self.username or "astrbot",
+                        "page": 1,
+                        "page_size": 100,
+                    }
+                )
+            endpoint = (
+                f"{self.openapi_base}/chat/sessions"
+                if self.uses_openapi
+                else f"{self.api_base}/chat/sessions"
             )
+
+            response = await client.get(endpoint, params=params, headers=self._get_headers())
 
             if response.status_code != 200:
                 return False, f"HTTP {response.status_code}"
@@ -1401,7 +1430,10 @@ class AstrBotApiClient:
             data = response.json()
 
             if data.get("status") == "ok":
-                return True, data.get("data", [])
+                result = data.get("data", [])
+                if self.uses_openapi and isinstance(result, dict):
+                    result = result.get("sessions", [])
+                return True, result
             else:
                 return False, data.get("message", "获取会话列表失败")
 
@@ -1501,12 +1533,15 @@ class AstrBotApiClient:
             files = {"file": (filename, file_content, content_type)}
 
             # 不使用 JSON 头，使用 multipart
-            headers = {}
-            if self.token:
-                headers["Authorization"] = f"Bearer {self.token}"
+            headers = self._get_multipart_headers()
+            endpoint = (
+                f"{self.openapi_base}/file"
+                if self.uses_openapi
+                else f"{self.api_base}/chat/post_file"
+            )
 
             response = await client.post(
-                f"{self.api_base}/chat/post_file",
+                endpoint,
                 files=files,
                 headers=headers,
             )
@@ -1606,10 +1641,13 @@ class AstrBotApiClient:
         """
         # 构建请求体
         body = {
-            "session_id": session_id,
             "message": message,
             "enable_streaming": enable_streaming,
         }
+        if session_id:
+            body["session_id"] = session_id
+        if self.uses_openapi:
+            body["username"] = self.username or "astrbot"
 
         if selected_provider:
             body["selected_provider"] = selected_provider
@@ -1630,11 +1668,16 @@ class AstrBotApiClient:
             headers["Cache-Control"] = "no-cache"
             # 强制不复用连接
             headers["Connection"] = "close"
+            endpoint = (
+                f"{self.openapi_base}/chat"
+                if self.uses_openapi
+                else f"{self.api_base}/chat/send"
+            )
 
-            logger.debug(f"[SSE] 开始发送请求到 {self.api_base}/chat/send")
+            logger.debug(f"[SSE] 开始发送请求到 {endpoint}")
             async with client.stream(
                 "POST",
-                f"{self.api_base}/chat/send",
+                endpoint,
                 json=body,
                 headers=headers,
             ) as response:
@@ -1666,12 +1709,7 @@ class AstrBotApiClient:
                             event_type = event_data.get("type", "plain")
 
                             raw_data = event_data.get("data")
-                            if raw_data is None:
-                                data_value = ""
-                            elif not isinstance(raw_data,str):
-                                data_value = str(raw_data)
-                            else:
-                                data_value = raw_data
+                            data_value = self._normalize_sse_data_value(raw_data)
 
                             event = SSEEvent(
                                 event_type=event_type,
@@ -1715,6 +1753,18 @@ class AstrBotApiClient:
                 await client.aclose()
             except Exception:
                 pass
+
+    @staticmethod
+    def _normalize_sse_data_value(raw_data: Any) -> str:
+        """将 SSE data 统一转换为稳定的字符串表示。"""
+        if raw_data is None:
+            return ""
+        if isinstance(raw_data, str):
+            return raw_data
+        try:
+            return json.dumps(raw_data, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return str(raw_data)
 
     async def send_text_message(
         self,

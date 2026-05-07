@@ -45,13 +45,16 @@ class TestServerConfig:
         assert config.url == "http://localhost:6185"
         assert config.username == "astrbot"
         assert config.password == ""
+        assert config.api_key == ""
+        assert config.auth_mode == "openapi"
         assert config.token is None
         assert config.auto_reconnect is True
         assert config.reconnect_interval == 5
-        assert config.startup_delay == 3
+        assert config.startup_delay == 5
         assert config.max_reconnect_attempts == 0
         assert config.request_timeout == 30
         assert config.enable_streaming is True
+        assert config.enable_remote_control is False
 
     @pytest.mark.unit
     def test_custom_values(self):
@@ -60,6 +63,8 @@ class TestServerConfig:
             url="http://custom:8080",
             username="custom_user",
             password="custom_pass",
+            api_key="abk_custom",
+            auth_mode="legacy",
             token="token123",
             auto_reconnect=False,
             reconnect_interval=10,
@@ -68,6 +73,8 @@ class TestServerConfig:
         assert config.url == "http://custom:8080"
         assert config.username == "custom_user"
         assert config.password == "custom_pass"
+        assert config.api_key == "abk_custom"
+        assert config.auth_mode == "legacy"
         assert config.token == "token123"
         assert config.auto_reconnect is False
         assert config.reconnect_interval == 10
@@ -86,7 +93,7 @@ class TestAppearanceConfig:
         assert config.avatar_path == ""
         assert config.user_avatar_path == ""
         assert config.bot_avatar_path == ""
-        assert config.theme == "auto"
+        assert config.theme == "tiktok"
         assert config.always_on_top is False
         assert config.breathing_enabled is True
         assert config.auto_start is False
@@ -431,3 +438,16 @@ class TestConfigEdgeCases:
         loaded = ClientConfig.load(str(temp_config_file))
 
         assert loaded.server.password == config.server.password
+
+    @pytest.mark.unit
+    def test_api_key_is_obfuscated_on_disk(self, temp_config_file: Path):
+        config = ClientConfig()
+        config.server.api_key = "abk_secret"
+
+        config.save(str(temp_config_file))
+
+        raw = temp_config_file.read_text(encoding="utf-8")
+        assert "abk_secret" not in raw
+
+        loaded = ClientConfig.load(str(temp_config_file))
+        assert loaded.server.api_key == "abk_secret"

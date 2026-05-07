@@ -38,7 +38,7 @@ from qasync import asyncSlot
 from ..api_client import AstrBotApiClient
 from ..utils.autostart import is_autostart_enabled, set_autostart
 from ..services import get_chat_history_manager
-from ..config import save_config, ClientConfig, CustomThemeConfig
+from ..config import ClientConfig, CustomThemeConfig, save_config
 from .themes import theme_manager, Theme
 from .icons import icon_manager
 from .hotkeys import HotkeyConfig, hotkey_manager
@@ -297,6 +297,16 @@ class SettingsWindow(QWidget):
         self._username.setPlaceholderText("用户名")
         section.add_row("用户名", self._username)
 
+        self._auth_mode = QComboBox()
+        self._auth_mode.addItem("OpenAPI (API Key)", "openapi")
+        self._auth_mode.addItem("Legacy (用户名/密码)", "legacy")
+        section.add_row("认证方式", self._auth_mode)
+
+        self._api_key = QLineEdit()
+        self._api_key.setPlaceholderText("abk_xxx")
+        self._api_key.setEchoMode(QLineEdit.EchoMode.Password)
+        section.add_row("API Key", self._api_key)
+
         self._password = QLineEdit()
         self._password.setPlaceholderText("密码")
         self._password.setEchoMode(QLineEdit.EchoMode.Password)
@@ -314,6 +324,8 @@ class SettingsWindow(QWidget):
         section.add_row("WebSocket 地址 (可选)", self._ws_url)
 
         self._enable_streaming = QCheckBox("启用流式输出 (打字机效果)")
+        self._enable_remote_control = QCheckBox("启用远控 WebSocket (需要服务端桌宠插件)")
+        section.add_widget(self._enable_remote_control)
         section.add_widget(self._enable_streaming)
 
         # 测试连接按钮
@@ -1878,13 +1890,33 @@ class SettingsWindow(QWidget):
             self._server_url.setText(self.config.server.url or "")
             self._username.setText(self.config.server.username or "")
             self._password.setText(self.config.server.password or "")
+            self._api_key.setText(self.config.server.api_key or "")
+            self._auth_mode.setCurrentIndex(
+                max(0, self._auth_mode.findData(self.config.server.auth_mode or "openapi"))
+            )
             self._ws_url.setText(self.config.server.ws_url or "")
+            self._enable_remote_control.setChecked(
+                self.config.server.enable_remote_control
+            )
             self._enable_streaming.setChecked(self.config.server.enable_streaming)
         elif isinstance(self.config, dict):  # Dict
             self._server_url.setText(self.config.get("server_url", ""))
             self._username.setText(self.config.get("username", ""))
             self._password.setText(self.config.get("password", ""))
+            self._api_key.setText(self.config.get("api_key", ""))
+            self._auth_mode.setCurrentIndex(
+                max(0, self._auth_mode.findData(self.config.get("auth_mode", "openapi")))
+            )
             self._ws_url.setText(self.config.get("ws_url", ""))
+            self._enable_remote_control.setChecked(
+                self.config.get("enable_remote_control", False)
+            )
+
+        self._server_url.setModified(False)
+        self._username.setModified(False)
+        self._password.setModified(False)
+        self._api_key.setModified(False)
+        self._ws_url.setModified(False)
 
         # 外观设置
         if hasattr(self.config, "appearance"):
@@ -2343,12 +2375,22 @@ class SettingsWindow(QWidget):
         url = self._server_url.text().strip()
         username = self._username.text().strip()
         password = self._password.text().strip()
+        api_key = self._api_key.text().strip()
+        auth_mode = self._auth_mode.currentData() or "openapi"
 
         if not url:
             QMessageBox.warning(self, "错误", "请输入服务器地址")
             return
 
-        if not username or not password:
+        if not username:
+            QMessageBox.warning(self, "错误", "请输入 username")
+            return
+
+        if auth_mode == "openapi" and not api_key:
+            QMessageBox.warning(self, "错误", "请输入 OpenAPI API Key")
+            return
+
+        if auth_mode == "legacy" and not password:
             QMessageBox.warning(self, "错误", "请输入用户名和密码")
             return
 
@@ -2358,7 +2400,12 @@ class SettingsWindow(QWidget):
         try:
             # 使用临时客户端测试
             client = AstrBotApiClient(
-                server_url=url, username=username, password=password, timeout=5
+                server_url=url,
+                username=username,
+                password=password,
+                api_key=api_key,
+                auth_mode=auth_mode,
+                timeout=5,
             )
             success, msg = await client.login()
             await client.close()
@@ -2380,13 +2427,47 @@ class SettingsWindow(QWidget):
 
     def _on_save(self):
         """保存设置"""
+        server_password = self._password.text()
+        server_auth_mode = self._auth_mode.currentData() or "openapi"
+        server_remote_control = self._enable_remote_control.isChecked()
+        current_server = getattr(self.config, "server", None)
+        if (
+            hasattr(self.config, "server")
+            and not self._password.isModified()
+            and not server_password
+        ):
+            server_password = self.config.server.password or ""
+        server_api_key = self._api_key.text()
+        if (
+            hasattr(self.config, "server")
+            and not self._api_key.isModified()
+            and not server_api_key
+        ):
+            server_api_key = self.config.server.api_key or ""
+
         settings = {
             "server": {
                 "url": self._server_url.text(),
                 "username": self._username.text(),
-                "password": self._password.text(),
+                "password": server_password,
+                "api_key": server_api_key,
+                "auth_mode": server_auth_mode,
                 "ws_url": self._ws_url.text(),
+                "enable_remote_control": server_remote_control,
                 "enable_streaming": self._enable_streaming.isChecked(),
+                "url_modified": self._server_url.isModified(),
+                "username_modified": self._username.isModified(),
+                "password_modified": self._password.isModified(),
+                "api_key_modified": self._api_key.isModified(),
+                "auth_mode_modified": (
+                    current_server is None
+                    or server_auth_mode != current_server.auth_mode
+                ),
+                "ws_url_modified": self._ws_url.isModified(),
+                "enable_remote_control_modified": (
+                    current_server is None
+                    or server_remote_control != current_server.enable_remote_control
+                ),
             },
             "appearance": {
                 "theme": self._theme_combo.currentData(),
@@ -2457,7 +2538,12 @@ class SettingsWindow(QWidget):
             self.config.server.url = settings["server"]["url"]
             self.config.server.username = settings["server"]["username"]
             self.config.server.password = settings["server"]["password"]
+            self.config.server.api_key = settings["server"]["api_key"]
+            self.config.server.auth_mode = settings["server"]["auth_mode"]
             self.config.server.ws_url = settings["server"]["ws_url"]
+            self.config.server.enable_remote_control = settings["server"][
+                "enable_remote_control"
+            ]
             self.config.server.enable_streaming = settings["server"]["enable_streaming"]
 
             # 外观
@@ -2608,11 +2694,11 @@ class SettingsWindow(QWidget):
             else:
                 theme_manager.reset_custom_colors()
 
-            # 保存到磁盘
-            if hasattr(self.config, "save"):
-                self.config.save()
-            else:
-                save_config(self.config)
+        # 保存到磁盘
+        if hasattr(self.config, "save"):
+            self.config.save()
+        else:
+            save_config(self.config)
 
         # 应用快捷键配置
         hotkey_config = HotkeyConfig.from_dict(settings["hotkeys"])

@@ -128,24 +128,60 @@ class SettingsController(QObject):
         Returns:
             是否需要重连
         """
-        need_reconnect = False
+        if not server:
+            return False
 
-        if "url" in server or "username" in server or "password" in server:
-            if self._bridge:
-                self._bridge.update_server_config(
-                    url=server.get("url"),
-                    username=server.get("username"),
-                    password=server.get("password"),
-                )
-            if "url" in server:
-                self._config.server.url = server["url"]
-            if "username" in server:
-                self._config.server.username = server["username"]
-            if "password" in server:
-                self._config.server.password = server["password"]
-            if "enable_streaming" in server:
-                self._config.server.enable_streaming = server["enable_streaming"]
-            need_reconnect = True
+        current_server = self._config.server
+
+        password_value = server.get("password", current_server.password)
+        if (
+            server.get("password_modified") is False
+            and not password_value
+            and current_server.password
+        ):
+            password_value = current_server.password
+
+        if "url" in server:
+            current_server.url = server["url"]
+        if "username" in server:
+            current_server.username = server["username"]
+        if "password" in server:
+            current_server.password = password_value
+        if "api_key" in server:
+            current_server.api_key = server["api_key"]
+        if "auth_mode" in server:
+            current_server.auth_mode = server["auth_mode"]
+        if "ws_url" in server:
+            current_server.ws_url = server["ws_url"]
+        if "enable_remote_control" in server:
+            current_server.enable_remote_control = server["enable_remote_control"]
+        if "enable_streaming" in server:
+            current_server.enable_streaming = server["enable_streaming"]
+
+        need_reconnect = any(
+            (
+                server.get("url_modified", False),
+                server.get("username_modified", False),
+                server.get("password_modified", False),
+                server.get("api_key_modified", False),
+                server.get("auth_mode_modified", False),
+                server.get("ws_url_modified", False),
+                server.get("enable_remote_control_modified", False),
+            )
+        )
+
+        if need_reconnect and self._bridge:
+            self._bridge.update_server_config(
+                url=current_server.url if "url" in server else None,
+                username=current_server.username if "username" in server else None,
+                password=password_value if "password" in server else None,
+                api_key=current_server.api_key if "api_key" in server else None,
+                auth_mode=current_server.auth_mode if "auth_mode" in server else None,
+                ws_url=current_server.ws_url if "ws_url" in server else None,
+                enable_remote_control=current_server.enable_remote_control
+                if "enable_remote_control" in server
+                else None,
+            )
 
         return need_reconnect
 

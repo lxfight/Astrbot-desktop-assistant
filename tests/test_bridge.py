@@ -315,6 +315,46 @@ class TestMessageBridgeFunctionResultExtraction:
 
             assert result == "带空白的结果"
 
+    @pytest.mark.unit
+    def test_extract_function_result_python_repr_dict(
+        self, mock_qt_app, sample_config: ClientConfig
+    ):
+        """测试兼容 Python repr 风格的函数结果"""
+        with patch("desktop_client.bridge.AstrBotApiClient"):
+            bridge = MessageBridge(sample_config)
+
+            raw_content = "{'id': 'call_789', 'result': {'answer': 'ok'}}"
+
+            result = bridge._extract_function_result(raw_content)
+
+            assert json.loads(result) == {"answer": "ok"}
+
+    @pytest.mark.unit
+    def test_is_tool_call_json_python_repr(
+        self, mock_qt_app, sample_config: ClientConfig
+    ):
+        """测试识别 Python repr 风格的工具调用"""
+        with patch("desktop_client.bridge.AstrBotApiClient"):
+            bridge = MessageBridge(sample_config)
+
+            raw_content = "{'id': 'call_123', 'name': 'search', 'args': {'q': 'hi'}}"
+
+            assert bridge._is_tool_call_json(raw_content) is True
+
+    @pytest.mark.unit
+    def test_is_tool_call_json_regular_payload_false(
+        self, mock_qt_app, sample_config: ClientConfig
+    ):
+        """测试普通结构化文本不会被误判为工具调用"""
+        with patch("desktop_client.bridge.AstrBotApiClient"):
+            bridge = MessageBridge(sample_config)
+
+            raw_content = (
+                '{"id": "report_123", "name": "日报", "args": {"summary": "普通业务数据"}}'
+            )
+
+            assert bridge._is_tool_call_json(raw_content) is False
+
 
 class TestMessageBridgeSSEEventHandling:
     """消息桥接器 SSE 事件处理测试"""
@@ -384,6 +424,50 @@ class TestMessageBridgeSSEEventHandling:
 
             # 思维链事件应该被跳过
             assert len(received_messages) == 0
+
+    @pytest.mark.unit
+    def test_handle_python_repr_tool_call_event_skipped(
+        self, mock_qt_app, sample_config: ClientConfig
+    ):
+        """测试跳过 Python repr 风格的工具调用事件"""
+        with patch("desktop_client.bridge.AstrBotApiClient"):
+            bridge = MessageBridge(sample_config)
+
+            received_messages = []
+            bridge.message_received.connect(lambda msg: received_messages.append(msg))
+
+            event = SSEEvent(
+                event_type="plain",
+                data="{'id': 'call_123', 'name': 'search', 'args': {'q': 'hi'}}",
+                streaming=False,
+            )
+
+            bridge._handle_sse_event(event, "session_123")
+
+            assert len(received_messages) == 0
+
+    @pytest.mark.unit
+    def test_handle_regular_structured_text_not_skipped(
+        self, mock_qt_app, sample_config: ClientConfig
+    ):
+        """测试普通结构化文本仍会透传给界面"""
+        with patch("desktop_client.bridge.AstrBotApiClient"):
+            bridge = MessageBridge(sample_config)
+
+            received_messages = []
+            bridge.message_received.connect(lambda msg: received_messages.append(msg))
+
+            event = SSEEvent(
+                event_type="plain",
+                data='{"id": "report_123", "name": "日报", "args": {"summary": "普通业务数据"}}',
+                streaming=False,
+            )
+
+            bridge._handle_sse_event(event, "session_123")
+
+            assert len(received_messages) == 1
+            assert received_messages[0].msg_type == "text"
+            assert received_messages[0].content == event.data
 
     @pytest.mark.unit
     def test_handle_empty_non_streaming_skipped(
@@ -598,6 +682,31 @@ class TestMessageBridgeServerConfig:
             # 其他字段不变
             assert bridge.config.server.username == original_username
 
+    @pytest.mark.unit
+    def test_update_server_config_applies_openapi_fields(
+        self, mock_qt_app, sample_config: ClientConfig
+    ):
+        """测试 OpenAPI 相关字段同步到桥接层"""
+        with patch("desktop_client.bridge.AstrBotApiClient") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client_cls.return_value = mock_client
+
+            bridge = MessageBridge(sample_config)
+
+            bridge.update_server_config(
+                api_key="abk_new",
+                auth_mode="openapi",
+                enable_remote_control=True,
+            )
+
+            assert bridge.config.server.api_key == "abk_new"
+            assert bridge.config.server.auth_mode == "openapi"
+            assert bridge.config.server.enable_remote_control is True
+            assert bridge.config.session_id is None
+            assert mock_client.api_key == "abk_new"
+            assert mock_client.auth_mode == "openapi"
+            assert mock_client.token is None
+
 
 class TestMessageBridgeAsync:
     """消息桥接器异步方法测试"""
@@ -625,6 +734,37 @@ class TestMessageBridgeAsync:
             assert success is True
             assert "Token" in message
             mock_client.check_connection.assert_called_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_connect_server_openapi_mode(
+        self, mock_qt_app, sample_config: ClientConfig
+    ):
+        """测试 OpenAPI 模式连接服务器"""
+        with patch("desktop_client.bridge.AstrBotApiClient") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client.uses_openapi = True
+            mock_client.login = AsyncMock(return_value=(True, "OpenAPI 连接成功"))
+            mock_client.create_session = AsyncMock(
+                return_value=(True, "desktop_123456")
+            )
+            mock_client.start_health_check = AsyncMock()
+            mock_client_cls.return_value = mock_client
+
+            sample_config.server.api_key = "abk_test"
+            sample_config.server.auth_mode = "openapi"
+            sample_config.session_id = None
+            sample_config.save = MagicMock(return_value=True)
+
+            bridge = MessageBridge(sample_config)
+            success, message = await bridge.connect_server()
+
+            assert success is True
+            assert message == "OpenAPI 连接成功"
+            assert sample_config.session_id == "desktop_123456"
+            mock_client.login.assert_awaited_once()
+            mock_client.create_session.assert_awaited_once()
+            mock_client.check_connection.assert_not_called()
 
     @pytest.mark.asyncio
     @pytest.mark.unit

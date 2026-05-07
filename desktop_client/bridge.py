@@ -6,6 +6,7 @@
 """
 
 import asyncio
+import ast
 import json
 import logging
 import time
@@ -67,6 +68,8 @@ class MessageBridge(QObject):
             server_url=config.server.url,
             username=config.server.username,
             password=config.server.password,
+            api_key=config.server.api_key,
+            auth_mode=config.server.auth_mode,
             token=config.server.token,
             timeout=config.server.request_timeout,
             on_state_change=self._on_api_state_change,
@@ -102,6 +105,17 @@ class MessageBridge(QObject):
     async def connect_server(self) -> tuple[bool, str]:
         """连接到服务器（登录）"""
         # 1. 尝试使用现有 Token 验证
+        if self.api_client.uses_openapi is True:
+            success, message = await self.api_client.login()
+            if success and not self.config.session_id:
+                session_ok, session_result = await self.api_client.create_session()
+                if session_ok:
+                    self.config.session_id = session_result
+                    self.config.save()
+                else:
+                    return False, f"创建会话失败: {session_result}"
+            return success, message
+
         if self.api_client.token:
             is_valid = await self.api_client.check_connection()
             if is_valid:
@@ -373,23 +387,15 @@ class MessageBridge(QObject):
         if not content:
             return content
 
-        content = content.strip()
-
-        # 快速检查是否可能是 JSON
-        if not (content.startswith("{") and content.endswith("}")):
+        data = self._parse_structured_content(content)
+        if not isinstance(data, dict):
             return content
 
-        try:
-            data = json.loads(content)
-            # 检查是否是函数调用结果的 JSON 格式
-            if isinstance(data, dict) and "id" in data and "result" in data:
-                result = data.get("result", "")
-                # 如果 result 存在且有内容，返回 result
-                if result:
-                    return str(result)
-        except (json.JSONDecodeError, TypeError, ValueError):
-            # 不是有效的 JSON，返回原始内容
-            pass
+        # 检查是否是函数调用结果的 JSON 格式
+        if "id" in data and "result" in data:
+            result = self._stringify_structured_content(data.get("result"))
+            if result:
+                return result
 
         return content
 
@@ -404,53 +410,93 @@ class MessageBridge(QObject):
         if not content:
             return False
 
-        content = content.strip()
+        data = self._parse_structured_content(content)
+        return self._contains_tool_call_payload(data)
 
-        # 快速检查是否可能是 JSON
-        if not content.startswith("{"):
-            return False
+    def _parse_structured_content(self, content: str) -> Any:
+        """解析 JSON 或 Python repr 风格的结构化文本。"""
+        if not content:
+            return None
 
-        try:
-            data = json.loads(content)
-            if not isinstance(data, dict):
-                return False
+        stripped = content.strip()
+        if not stripped or stripped[0] not in "{[":
+            return None
 
-            # 检测工具调用的特征模式
-            # 模式1: {"id": "call_xxx", "name": "...", "args": ...}
-            if "id" in data and "name" in data and "args" in data:
-                id_value = str(data.get("id", ""))
-                if id_value.startswith("call_"):
-                    return True
+        for parser in (json.loads, ast.literal_eval):
+            try:
+                return parser(stripped)
+            except (json.JSONDecodeError, SyntaxError, ValueError, TypeError):
+                continue
 
-            # 模式2: {"id": "...", "type": "function", ...}
-            if "id" in data and data.get("type") == "function":
+        return None
+
+    def _contains_tool_call_payload(self, data: Any) -> bool:
+        """递归检测工具调用载荷。"""
+        if isinstance(data, dict):
+            id_value = str(data.get("id", ""))
+            if id_value.startswith("call_") and (
+                "name" in data or "args" in data or "arguments" in data
+            ):
                 return True
-
-            # 模式3: 包含 function_call 或 tool_calls 字段
+            if data.get("type") == "function":
+                return True
             if "function_call" in data or "tool_calls" in data:
                 return True
+            return any(self._contains_tool_call_payload(v) for v in data.values())
 
-        except (json.JSONDecodeError, TypeError, ValueError):
-            pass
+        if isinstance(data, list):
+            return any(self._contains_tool_call_payload(item) for item in data)
 
         return False
+
+    def _stringify_structured_content(self, value: Any) -> str:
+        """将结构化结果转换为用户可读文本。"""
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        if isinstance(value, (dict, list)):
+            try:
+                return json.dumps(value, ensure_ascii=False)
+            except (TypeError, ValueError):
+                return str(value)
+        return str(value)
 
     def update_server_config(
         self,
         url: Optional[str] = None,
         username: Optional[str] = None,
         password: Optional[str] = None,
+        api_key: Optional[str] = None,
+        auth_mode: Optional[str] = None,
+        ws_url: Optional[str] = None,
+        enable_remote_control: Optional[bool] = None,
     ):
         """更新服务器配置"""
-        if url:
+        if url is not None:
             self.config.server.url = url
             self.api_client.server_url = url
-        if username:
+        if username is not None:
             self.config.server.username = username
             self.api_client.username = username
-        if password:
+        if password is not None:
             self.config.server.password = password
             self.api_client.password = password
+        if api_key is not None:
+            self.config.server.api_key = api_key
+            self.api_client.api_key = api_key
+        if auth_mode is not None:
+            self.config.server.auth_mode = auth_mode
+            self.api_client.auth_mode = auth_mode
+        if ws_url is not None:
+            self.config.server.ws_url = ws_url
+        if enable_remote_control is not None:
+            self.config.server.enable_remote_control = enable_remote_control
+
+        if any(
+            value is not None for value in (url, username, password, api_key, auth_mode)
+        ):
+            self.config.session_id = None
 
         # 清除旧 token 并重置状态
         self.config.server.token = None

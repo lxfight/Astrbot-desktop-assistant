@@ -129,22 +129,40 @@ class MediaHandler(QObject):
         self, filename: str, metadata: dict, should_silent: bool = False
     ) -> None:
         """处理 AI 返回的图片"""
-        asyncio.ensure_future(self._download_media(filename, "image", should_silent))
+        asyncio.ensure_future(
+            self._download_media(filename, "image", metadata, should_silent)
+        )
 
     def handle_voice_response(
         self, filename: str, metadata: dict, should_silent: bool = False
     ) -> None:
         """处理 AI 返回的语音"""
-        asyncio.ensure_future(self._download_media(filename, "voice", should_silent))
+        asyncio.ensure_future(
+            self._download_media(filename, "voice", metadata, should_silent)
+        )
 
     def handle_video_response(
         self, filename: str, metadata: dict, should_silent: bool = False
     ) -> None:
         """处理 AI 返回的视频"""
-        asyncio.ensure_future(self._download_media(filename, "video", should_silent))
+        asyncio.ensure_future(
+            self._download_media(filename, "video", metadata, should_silent)
+        )
+
+    def handle_file_response(
+        self, filename: str, metadata: dict, should_silent: bool = False
+    ) -> None:
+        """处理 AI 返回的文件"""
+        asyncio.ensure_future(
+            self._download_media(filename, "file", metadata, should_silent)
+        )
 
     async def _download_media(
-        self, filename: str, msg_type: str, should_silent: bool = False
+        self,
+        filename: str,
+        msg_type: str,
+        metadata: Optional[dict] = None,
+        should_silent: bool = False,
     ) -> None:
         """
         下载媒体文件并显示
@@ -195,6 +213,7 @@ class MediaHandler(QObject):
                             content=content,
                             msg_type="voice",
                             file_path=save_path,
+                            metadata=metadata,
                         )
                     # 免打扰模式下语音消息始终后台自动播放
                     self.play_audio(save_path)
@@ -209,6 +228,10 @@ class MediaHandler(QObject):
             elif msg_type == "video":
                 # 构建消息内容：path|thumbnail|duration
                 content = f"{save_path}||0"
+            elif msg_type == "file":
+                file_name = os.path.basename(save_path)
+                file_size = os.path.getsize(save_path)
+                content = f"{save_path}|{file_name}|{file_size}"
 
             if is_proactive_response or should_silent:
                 # 静默模式：添加到历史记录，不弹窗
@@ -218,6 +241,7 @@ class MediaHandler(QObject):
                         content=content,
                         msg_type=msg_type,
                         file_path=save_path,
+                        metadata=metadata,
                     )
                 # 设置未读消息标记
                 if self._floating_ball:
@@ -225,11 +249,20 @@ class MediaHandler(QObject):
             else:
                 # 正常模式：在窗口中显示并弹出
                 if self._floating_ball:
-                    # 通过 compact_window 添加消息
-                    self._floating_ball._compact_window.add_ai_message(
-                        content, msg_type
+                    self._floating_ball.show_bubble(
+                        content,
+                        msg_type=msg_type,
+                        metadata=metadata,
                     )
                     self._floating_ball.show_input()
+                elif self._chat_history_manager:
+                    self._chat_history_manager.add_message(
+                        role="assistant",
+                        content=content,
+                        msg_type=msg_type,
+                        file_path=save_path,
+                        metadata=metadata,
+                    )
 
             # 发射信号
             self.download_completed.emit(save_path, msg_type)

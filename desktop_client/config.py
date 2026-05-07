@@ -60,6 +60,8 @@ class ServerConfig:
     url: str = "http://localhost:6185"
     username: str = "astrbot"
     password: str = ""
+    api_key: str = ""
+    auth_mode: str = "openapi"
     # 认证 token（登录后获取）
     token: Optional[str] = None
     # 自动重连
@@ -82,6 +84,7 @@ class ServerConfig:
     # 格式示例: wss://example.com/ws/client 或 ws://192.168.1.100:6190/ws/client
     # 留空则自动根据 url 和 ws_port 构建连接地址
     ws_url: str = ""
+    enable_remote_control: bool = False
 
 
 @dataclass
@@ -436,6 +439,8 @@ class ClientConfig:
                 # 解密敏感字段
                 if "password" in data["server"]:
                     data["server"]["password"] = _deobfuscate(data["server"]["password"])
+                if "api_key" in data["server"] and data["server"]["api_key"]:
+                    data["server"]["api_key"] = _deobfuscate(data["server"]["api_key"])
                 if "token" in data["server"] and data["server"]["token"]:
                     data["server"]["token"] = _deobfuscate(data["server"]["token"])
                 for key, value in data["server"].items():
@@ -555,6 +560,8 @@ class ClientConfig:
                 # 加密敏感信息（密码和 token 不明文存储）
                 if data["server"].get("password"):
                     data["server"]["password"] = _obfuscate(data["server"]["password"])
+                if data["server"].get("api_key"):
+                    data["server"]["api_key"] = _obfuscate(data["server"]["api_key"])
                 if data["server"].get("token"):
                     data["server"]["token"] = _obfuscate(data["server"]["token"])
 
@@ -577,6 +584,10 @@ class ClientConfig:
             # 服务器配置
             "server_url": self.server.url,
             "username": self.server.username,
+            "api_key": self.server.api_key,
+            "auth_mode": self.server.auth_mode,
+            "ws_url": self.server.ws_url,
+            "enable_remote_control": self.server.enable_remote_control,
             "auto_reconnect": self.server.auto_reconnect,
             # 外观配置
             "ball_size": self.appearance.ball_size,
@@ -602,6 +613,14 @@ class ClientConfig:
             self.server.username = legacy["username"]
         if "password" in legacy:
             self.server.password = legacy["password"]
+        if "api_key" in legacy:
+            self.server.api_key = legacy["api_key"]
+        if "auth_mode" in legacy:
+            self.server.auth_mode = legacy["auth_mode"]
+        if "ws_url" in legacy:
+            self.server.ws_url = legacy["ws_url"]
+        if "enable_remote_control" in legacy:
+            self.server.enable_remote_control = legacy["enable_remote_control"]
         if "auto_reconnect" in legacy:
             self.server.auto_reconnect = legacy["auto_reconnect"]
 

@@ -11,7 +11,7 @@
 - 聊天记录持久化和跨窗口同步
 """
 
-from typing import Optional, Set
+from typing import Optional, Set, Dict, Any
 import os
 import sys
 import math
@@ -1271,6 +1271,7 @@ class CompactChatWindow(QWidget):
 
         self._displayed_message_ids.clear()
         self._message_labels.clear()
+        self._current_ai_message = ""
         self._current_ai_label = None
         self._current_ai_message_id = ""
         self._update_geometry()
@@ -1474,12 +1475,17 @@ class CompactChatWindow(QWidget):
         rounded_pixmap.setDevicePixelRatio(dpr)
         return rounded_pixmap
 
-    def add_ai_message(self, text: str, msg_type: str = "text"):
+    def add_ai_message(
+        self,
+        text: str,
+        msg_type: str = "text",
+        metadata: Optional[Dict[str, Any]] = None,
+    ):
         """添加 AI 消息（通过历史记录管理器）
 
         Args:
             text: 消息内容。对于语音消息，格式为 "path|duration"
-            msg_type: 消息类型，"text" 或 "voice"
+            msg_type: 消息类型
         """
         # 如果有等待中的消息（占位消息 "..."），需要替换它而不是创建新消息
         if self._current_ai_message_id and self._is_waiting:
@@ -1487,9 +1493,17 @@ class CompactChatWindow(QWidget):
             if msg_type == "voice":
                 # 语音消息需要特殊处理：删除占位消息的MarkdownLabel，显示语音组件
                 self._replace_waiting_with_voice(text)
+                if metadata:
+                    self._chat_history.update_message_metadata(
+                        self._current_ai_message_id, metadata
+                    )
             else:
                 # 文本消息：直接更新占位消息的内容
                 self._chat_history.update_message(self._current_ai_message_id, text)
+                if metadata:
+                    self._chat_history.update_message_metadata(
+                        self._current_ai_message_id, metadata
+                    )
                 if self._current_ai_label:
                     self._current_ai_label.set_markdown(text)
 
@@ -1499,13 +1513,19 @@ class CompactChatWindow(QWidget):
         # 没有等待中的消息，正常添加新消息
         # 解析语音消息的文件路径
         file_path = ""
-        if msg_type == "voice":
+        if msg_type in {"voice", "video", "file"}:
             parts = text.split("|")
             file_path = parts[0] if parts else ""
+        elif msg_type == "image":
+            file_path = text
 
         # 添加到历史记录
         msg = self._chat_history.add_message(
-            role="assistant", content=text, msg_type=msg_type, file_path=file_path
+            role="assistant",
+            content=text,
+            msg_type=msg_type,
+            file_path=file_path,
+            metadata=metadata,
         )
 
         # 显示消息
@@ -1653,23 +1673,23 @@ class CompactChatWindow(QWidget):
         # 如果用户已经手动调整过大小，尊重用户的选择
         if getattr(self, "_user_resized", False):
             return
-        
+
         # 计算内容所需的高度
         content_height = self._history_widget.sizeHint().height()
         input_height = self._input.sizeHint().height() + 40  # 输入框 + 边距
-        
+
         # 最小和最大高度限制
         min_height = 200
         max_height = 600
-        
+
         # 计算目标高度
         target_height = min(max(content_height + input_height + 60, min_height), max_height)
-        
+
         # 只在高度变化较大时调整（避免频繁闪烁）
         current_height = self.height()
         if abs(target_height - current_height) > 20:
             self.setFixedHeight(target_height)
-        
+
         # 更新布局
         self.updateGeometry()
 
@@ -1677,14 +1697,19 @@ class CompactChatWindow(QWidget):
         scrollbar = self._scroll_area.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
 
-    def update_streaming_response(self, content: str):
+    def update_streaming_response(
+        self, content: str, metadata: Optional[Dict[str, Any]] = None
+    ):
         """更新流式响应"""
         self._current_ai_message += content
 
         # 如果还没有创建AI消息，先创建一个
         if not self._current_ai_message_id:
             msg = self._chat_history.add_message(
-                role="assistant", content=content, msg_type="text"
+                role="assistant",
+                content=content,
+                msg_type="text",
+                metadata=metadata,
             )
             self._current_ai_message_id = msg.id
 
@@ -1697,7 +1722,13 @@ class CompactChatWindow(QWidget):
                     self._message_labels[msg.id] = label
         else:
             # 更新历史记录中的消息
-            self._chat_history.update_message(self._current_ai_message_id, self._current_ai_message)
+            self._chat_history.update_message(
+                self._current_ai_message_id, self._current_ai_message
+            )
+            if metadata:
+                self._chat_history.update_message_metadata(
+                    self._current_ai_message_id, metadata
+                )
             # 直接更新当前label
             if self._current_ai_label:
                 self._current_ai_label.set_markdown(self._current_ai_message)
@@ -1823,6 +1854,7 @@ class CompactChatWindow(QWidget):
                 self._current_ai_message_id, self._current_ai_message
             )
 
+        self._current_ai_message = ""
         self._current_ai_label = None
         self._current_ai_message_id = ""
 
@@ -2594,10 +2626,16 @@ class FloatingBallWindow(QWidget):
         if screenshot_path:
             self.screenshot_requested.emit(screenshot_path)
 
-    def show_bubble(self, text: str, duration: int = 0):
+    def show_bubble(
+        self,
+        text: str,
+        duration: int = 0,
+        msg_type: str = "text",
+        metadata: Optional[Dict[str, Any]] = None,
+    ):
         """显示气泡 (实际显示在精简窗口中)"""
         self._update_compact_window_position()
-        self._compact_window.add_ai_message(text)
+        self._compact_window.add_ai_message(text, msg_type=msg_type, metadata=metadata)
         self._compact_window.show()
 
     def show_system_message(self, text: str):
@@ -2664,8 +2702,19 @@ class FloatingBallWindow(QWidget):
     def is_waiting_response(self) -> bool:
         return self._compact_window._is_waiting
 
-    def update_streaming_response(self, content: str):
-        self._compact_window.update_streaming_response(content)
+    def has_active_response(self) -> bool:
+        return bool(
+            self._compact_window._current_ai_message_id
+            or self._compact_window._current_ai_message
+        )
+
+    def is_chat_window_visible(self) -> bool:
+        return self._compact_window.isVisible()
+
+    def update_streaming_response(
+        self, content: str, metadata: Optional[Dict[str, Any]] = None
+    ):
+        self._compact_window.update_streaming_response(content, metadata=metadata)
 
     def finish_response(self):
         self._compact_window.finish_response()

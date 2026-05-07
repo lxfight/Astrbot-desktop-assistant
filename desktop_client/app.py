@@ -271,7 +271,11 @@ class DesktopClientApp(QObject):
                     logger.debug("主动对话服务已启动")
 
             # 启动 WebSocket 连接（用于接收远程命令）
-            await self._start_websocket_connection()
+            if (
+                self.config.server.enable_remote_control
+                and self.config.server.auth_mode == "legacy"
+            ):
+                await self._start_websocket_connection()
         else:
             logger.error(f"服务器连接失败: {msg}")
             if self._floating_ball:
@@ -286,6 +290,13 @@ class DesktopClientApp(QObject):
     async def _start_websocket_connection(self):
         """启动 WebSocket 连接（用于接收服务端下发的命令）"""
         # 使用配置中的 session_id，如果为空则生成一个临时的
+        if not self.config.server.enable_remote_control:
+            logger.debug("远控 WebSocket 未启用，跳过连接")
+            return
+        if self.config.server.auth_mode != "legacy":
+            logger.warning("远控 WebSocket 依赖 legacy 插件 token，OpenAPI 模式下已跳过")
+            return
+
         session_id = self.config.session_id
         if not session_id:
             import uuid
@@ -476,7 +487,7 @@ class DesktopClientApp(QObject):
         self._floating_ball.restart_requested.connect(self._restart)
         self._floating_ball.quit_requested.connect(self._quit)
         self._floating_ball.screenshot_requested.connect(
-            self._screenshot_handler.on_screenshot
+            self._on_screenshot_captured
         )
         self._floating_ball.message_sent.connect(self._on_message_sent)
         self._floating_ball.image_sent.connect(self._on_image_sent)
@@ -606,6 +617,11 @@ class DesktopClientApp(QObject):
 
         logger.debug("悬浮球双击：触发主动对话截图...")
         self._screenshot_handler.do_proactive_screenshot()
+
+    def _on_screenshot_captured(self, screenshot_path: str):
+        """处理悬浮球截图完成后的文件路径。"""
+        if screenshot_path:
+            self._screenshot_handler.add_screenshot_to_chat(screenshot_path)
 
     def _show_bubble_input(self):
         """显示气泡输入"""

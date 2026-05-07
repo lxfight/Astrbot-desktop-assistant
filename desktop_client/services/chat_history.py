@@ -235,6 +235,32 @@ class ChatHistoryManager(QObject):
 
         return False
 
+    def update_message_metadata(
+        self,
+        message_id: str,
+        metadata: Optional[Dict[str, Any]] = None,
+        merge: bool = True,
+    ) -> bool:
+        """更新消息元数据。"""
+        if not metadata:
+            return False
+
+        for msg in self._messages:
+            if msg.id == message_id:
+                if merge:
+                    merged_metadata = dict(msg.metadata or {})
+                    merged_metadata.update(metadata)
+                    msg.metadata = merged_metadata
+                else:
+                    msg.metadata = dict(metadata)
+
+                self._dirty = True
+                if self._auto_save:
+                    self._schedule_save()
+                return True
+
+        return False
+
     def get_last_message(self) -> Optional[ChatMessage]:
         """获取最后一条消息"""
         if self._messages:

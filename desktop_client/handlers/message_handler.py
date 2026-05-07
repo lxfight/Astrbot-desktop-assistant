@@ -51,6 +51,9 @@ class MessageHandler(QObject):
 
         # 静默响应缓冲区
         self._silent_response_buffer = ""
+        self._streaming_response_buffer = ""
+        self._silent_response_metadata: dict = {}
+        self._streaming_response_metadata: dict = {}
 
     def set_floating_ball(self, floating_ball: Any) -> None:
         """设置悬浮球实例"""
@@ -89,11 +92,6 @@ class MessageHandler(QObject):
         # 检查免打扰模式
         do_not_disturb = self._config.interaction.do_not_disturb
 
-        # 检查是否正在等待响应（用户主动发起的对话）
-        (
-            self._floating_ball and self._floating_ball.is_waiting_response()
-        )
-
         # 判断是否需要静默处理（免打扰模式）
         should_silent = do_not_disturb
 
@@ -104,6 +102,7 @@ class MessageHandler(QObject):
                 is_proactive_response,
                 should_silent,
                 do_not_disturb,
+                message.metadata,
             )
 
         elif msg_type == "image":
@@ -127,6 +126,12 @@ class MessageHandler(QObject):
                     content, message.metadata, should_silent
                 )
 
+        elif msg_type == "file":
+            if self._media_handler:
+                self._media_handler.handle_file_response(
+                    content, message.metadata, should_silent
+                )
+
         elif msg_type == "end":
             self._handle_end_message(is_proactive_response, should_silent)
 
@@ -135,6 +140,9 @@ class MessageHandler(QObject):
 
         elif msg_type == "error":
             self._handle_error_message(content, is_proactive_response, should_silent)
+
+        elif msg_type == "saved":
+            self._handle_saved_message(message.metadata)
 
     def _handle_status_message(self, content: str) -> None:
         """处理状态消息（连接状态变更）"""
@@ -162,6 +170,7 @@ class MessageHandler(QObject):
         is_proactive_response: bool,
         should_silent: bool,
         do_not_disturb: bool,
+        message_metadata: Optional[dict] = None,
     ) -> None:
         """处理文本消息"""
         # 忽略空消息
@@ -177,55 +186,72 @@ class MessageHandler(QObject):
             if streaming:
                 # 流式响应时累积内容
                 self._silent_response_buffer += content
+                self._silent_response_metadata = self._merge_message_metadata(
+                    self._silent_response_metadata, message_metadata
+                )
             else:
                 # 非流式完整响应：静默添加到历史记录，不显示气泡
                 if self._chat_history_manager:
                     self._chat_history_manager.add_message(
-                        role="assistant", content=content, msg_type="text"
+                        role="assistant",
+                        content=content,
+                        msg_type="text",
+                        metadata=message_metadata,
                     )
                 # 仅设置未读消息标记（显示动画效果）
                 if self._floating_ball:
                     self._floating_ball.set_unread_message(True)
                 if is_proactive_response:
                     self._proactive_dialog_pending = False
+                self._silent_response_metadata = {}
             return
 
         if streaming:
             # 流式响应
+            self._streaming_response_buffer += content
+            self._streaming_response_metadata = self._merge_message_metadata(
+                self._streaming_response_metadata, message_metadata
+            )
             if self._floating_ball:
-                # 只有当气泡正在显示或等待响应时才更新
-                if (
-                    self._floating_ball.is_waiting_response()
-                    or not self._floating_ball._compact_window.isHidden()
-                ):
-                    self._floating_ball.update_streaming_response(content)
+                self._floating_ball.update_streaming_response(
+                    content, metadata=message_metadata
+                )
 
         else:
             # 完整响应（非流式）
             if self._floating_ball:
-                if self._floating_ball.is_waiting_response():
-                    self._floating_ball.update_streaming_response(content)
+                if self._has_active_response():
+                    combined_metadata = self._merge_message_metadata(
+                        self._streaming_response_metadata, message_metadata
+                    )
+                    self._floating_ball.update_streaming_response(
+                        content, metadata=combined_metadata
+                    )
                     self._floating_ball.finish_response()
-                else:
-                    # 免打扰模式：静默处理，不弹窗
-                    if do_not_disturb:
-                        if self._chat_history_manager:
-                            self._chat_history_manager.add_message(
-                                role="assistant", content=content, msg_type="text"
-                            )
+                    if not self._is_chat_window_visible():
                         self._floating_ball.set_unread_message(True)
-                    else:
-                        # 在气泡中显示摘要
-                        summary = (
-                            content[:100] + "..." if len(content) > 100 else content
-                        )
-                        self._floating_ball.show_bubble(summary)
+                else:
+                    self._floating_ball.show_bubble(content, metadata=message_metadata)
             else:
                 # 没有 UI 实例，直接写入历史
                 if self._chat_history_manager:
-                    self._chat_history_manager.add_message(
-                        role="assistant", content=content, msg_type="text"
+                    combined_metadata = self._merge_message_metadata(
+                        self._streaming_response_metadata, message_metadata
                     )
+                    full_content = (
+                        self._streaming_response_buffer + content
+                        if self._streaming_response_buffer
+                        else content
+                    )
+                    self._chat_history_manager.add_message(
+                        role="assistant",
+                        content=full_content,
+                        msg_type="text",
+                        metadata=combined_metadata,
+                    )
+
+            self._streaming_response_buffer = ""
+            self._streaming_response_metadata = {}
 
     def _handle_end_message(
         self, is_proactive_response: bool, should_silent: bool
@@ -237,25 +263,40 @@ class MessageHandler(QObject):
             buffer = self._silent_response_buffer
             if buffer and self._chat_history_manager:
                 self._chat_history_manager.add_message(
-                    role="assistant", content=buffer, msg_type="text"
+                    role="assistant",
+                    content=buffer,
+                    msg_type="text",
+                    metadata=self._silent_response_metadata,
                 )
                 # 仅设置未读消息标记（显示动画效果）
                 if self._floating_ball:
                     self._floating_ball.set_unread_message(True)
 
             # 如果是用户等待中（但被静默了），需要重置等待状态
-            if self._floating_ball and self._floating_ball.is_waiting_response():
+            if self._floating_ball and self._has_active_response():
                 self._floating_ball.finish_response()
 
             # 清理状态
             if is_proactive_response:
                 self._proactive_dialog_pending = False
             self._silent_response_buffer = ""
+            self._silent_response_metadata = {}
             return
 
-        # 气泡输入框完成响应
-        if self._floating_ball and self._floating_ball.is_waiting_response():
+        if self._floating_ball and self._has_active_response():
             self._floating_ball.finish_response()
+            if not self._is_chat_window_visible():
+                self._floating_ball.set_unread_message(True)
+        elif self._streaming_response_buffer and self._chat_history_manager:
+            self._chat_history_manager.add_message(
+                role="assistant",
+                content=self._streaming_response_buffer,
+                msg_type="text",
+                metadata=self._streaming_response_metadata,
+            )
+
+        self._streaming_response_buffer = ""
+        self._streaming_response_metadata = {}
 
     def _handle_error_message(
         self, content: str, is_proactive_response: bool, should_silent: bool
@@ -267,9 +308,12 @@ class MessageHandler(QObject):
             if is_proactive_response:
                 self._proactive_dialog_pending = False
             self._silent_response_buffer = ""
+            self._streaming_response_buffer = ""
+            self._silent_response_metadata = {}
+            self._streaming_response_metadata = {}
 
             # 如果是用户等待中（但被静默了），需要重置等待状态
-            if self._floating_ball and self._floating_ball.is_waiting_response():
+            if self._floating_ball and self._has_active_response():
                 self._floating_ball.finish_response()
 
             # 静默模式下错误也只显示未读标记
@@ -277,10 +321,120 @@ class MessageHandler(QObject):
                 self._floating_ball.set_unread_message(True)
             return
 
+        self._streaming_response_buffer = ""
+        self._streaming_response_metadata = {}
+
         if self._floating_ball:
             # 如果气泡输入框在等待，也需要结束等待并显示错误
-            if self._floating_ball.is_waiting_response():
+            if self._has_active_response():
                 self._floating_ball.update_streaming_response(f"❌ {content}")
                 self._floating_ball.finish_response()
+                if not self._is_chat_window_visible():
+                    self._floating_ball.set_unread_message(True)
             else:
                 self._floating_ball.show_bubble(f"❌ {content}")
+        elif self._chat_history_manager:
+            self._chat_history_manager.add_message(
+                role="assistant", content=f"❌ {content}", msg_type="text"
+            )
+
+    def _handle_saved_message(self, metadata: Optional[dict]) -> None:
+        """记录服务端保存后的消息元数据。"""
+        if not metadata or not self._chat_history_manager:
+            return
+
+        getter = getattr(self._chat_history_manager, "get_messages", None)
+        updater = getattr(self._chat_history_manager, "update_message_metadata", None)
+        saver = getattr(self._chat_history_manager, "save_to_file", None)
+        if not callable(getter) or not callable(updater):
+            return
+
+        server_message_id = metadata.get("message_id")
+        server_created_at = metadata.get("created_at")
+        request_id = metadata.get("request_id")
+
+        if not any((server_message_id, server_created_at, request_id)):
+            return
+
+        target_message_id = None
+
+        try:
+            for msg in reversed(getter()):
+                if getattr(msg, "role", None) != "assistant":
+                    continue
+
+                current_metadata = getattr(msg, "metadata", None)
+                if not isinstance(current_metadata, dict):
+                    current_metadata = {}
+
+                if request_id and current_metadata.get("request_id") != request_id:
+                    continue
+
+                target_message_id = getattr(msg, "id", None)
+                break
+
+            if not target_message_id and not request_id:
+                for msg in reversed(getter()):
+                    if getattr(msg, "role", None) == "assistant":
+                        target_message_id = getattr(msg, "id", None)
+                        break
+
+            if not target_message_id:
+                logger.debug(
+                    "未找到可绑定的服务端消息元数据: request_id=%s, server_message_id=%s",
+                    request_id,
+                    server_message_id,
+                )
+                return
+
+            updated = updater(
+                target_message_id,
+                {
+                    key: value
+                    for key, value in {
+                        "server_message_id": server_message_id,
+                        "server_created_at": server_created_at,
+                        "request_id": request_id,
+                    }.items()
+                    if value
+                },
+            )
+            if updated and callable(saver):
+                saver()
+
+            logger.debug(
+                "已记录服务端消息元数据: message_id=%s, server_message_id=%s, request_id=%s",
+                target_message_id,
+                server_message_id,
+                request_id,
+            )
+        except Exception as e:
+            logger.debug(f"记录服务端消息元数据失败: {e}")
+
+    @staticmethod
+    def _merge_message_metadata(
+        current_metadata: Optional[dict], incoming_metadata: Optional[dict]
+    ) -> dict:
+        """合并消息元数据，保留已有字段。"""
+        merged = dict(current_metadata or {})
+        if incoming_metadata:
+            merged.update(incoming_metadata)
+        return merged
+
+    def _has_active_response(self) -> bool:
+        """检查当前是否有未收尾的前台响应。"""
+        if not self._floating_ball:
+            return False
+        checker = getattr(self._floating_ball, "has_active_response", None)
+        if callable(checker):
+            return bool(checker())
+        return False
+
+    def _is_chat_window_visible(self) -> bool:
+        """检查聊天窗口当前是否可见。"""
+        if not self._floating_ball:
+            return False
+        checker = getattr(self._floating_ball, "is_chat_window_visible", None)
+        if callable(checker):
+            return bool(checker())
+        return False

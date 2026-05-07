@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from desktop_client.config import (
     ClientConfig,
 )
+import desktop_client.config as config_module
 from desktop_client.api_client import (
     AstrBotApiClient,
     ConnectionState,
@@ -423,6 +424,18 @@ def mock_env_vars(monkeypatch):
     """Mock 环境变量"""
     monkeypatch.setenv("APPDATA", str(Path(tempfile.gettempdir()) / "appdata"))
     monkeypatch.setenv("HOME", str(Path(tempfile.gettempdir()) / "home"))
+
+
+@pytest.fixture(autouse=True)
+def isolate_user_config_dir(tmp_path: Path, monkeypatch):
+    """隔离真实用户配置目录，避免测试污染本机配置。"""
+    appdata_dir = tmp_path / "appdata"
+    home_dir = tmp_path / "home"
+    monkeypatch.setenv("APPDATA", str(appdata_dir))
+    monkeypatch.setenv("HOME", str(home_dir))
+    config_module._cached_config_dir = None
+    yield
+    config_module._cached_config_dir = None
 
 
 # ============ Qt Mock（避免 GUI 依赖）============

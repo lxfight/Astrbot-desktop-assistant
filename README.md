@@ -186,6 +186,11 @@ python -m desktop_client
 
 点击悬浮球，说一声"你好"，你的桌面 AI 伙伴已经准备好了 🎉
 
+### 兼容性说明
+
+- 本仓库是桌面客户端，AstrBot 平台适配器和 `DesktopAssistantAdapter` 相关代码在服务端插件仓库 [astrbot_plugin_desktop_assistant](https://github.com/muyouzhi6/astrbot_plugin_desktop_assistant)
+- 如果升级 AstrBot 后出现 `DesktopAssistantAdapter.__init__() takes 3 positional arguments but 4 were given` 这类报错，需要更新服务端插件版本，单独重装桌面客户端通常解决不了
+
 ---
 
 ## 🔌 附加能力：QQ 远程功能
@@ -292,6 +297,30 @@ sudo dnf install mesa-libGL libxcb
 | Windows | 注册表 `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run` |
 | macOS | `launchctl list \| grep astrbot` |
 | Linux | `~/.config/autostart/astrbot-desktop-assistant.desktop` |
+
+---
+
+## 🧹 卸载
+
+### Windows
+
+1. 退出桌面客户端
+2. 删除项目目录或一键安装生成的程序目录
+3. 如启用了开机自启，在客户端设置里先关闭，或删除注册表 `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run` 中的 `AstrBotDesktopAssistant`
+4. 按需删除配置和聊天记录目录 `%APPDATA%\AstrBotDesktopClient`
+
+### macOS / Linux
+
+1. 退出桌面客户端
+2. 删除项目目录或虚拟环境目录
+3. 如启用了开机自启，删除对应自启动项
+   - macOS `~/Library/LaunchAgents/astrbot.desktop.assistant.plist`
+   - Linux `~/.config/autostart/astrbot-desktop-assistant.desktop`
+4. 按需删除配置和聊天记录目录 `~/.config/astrbot-desktop-client`
+
+### 服务端插件卸载
+
+如果不再需要 QQ 远程截图、桌面状态等能力，还需要到服务端单独卸载 [astrbot_plugin_desktop_assistant](https://github.com/muyouzhi6/astrbot_plugin_desktop_assistant)，它不包含在桌面客户端目录里。
 
 ---
 

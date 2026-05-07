@@ -1531,10 +1531,11 @@ class AstrBotApiClient:
                         try:
                             event_data = json.loads(data_str)
                             event_type = event_data.get("type", "plain")
+                            raw_data = event_data.get("data")
 
                             event = SSEEvent(
                                 event_type=event_type,
-                                data=event_data.get("data", ""),
+                                data=self._normalize_sse_data_value(raw_data),
                                 streaming=event_data.get("streaming", False),
                                 chain_type=event_data.get("chain_type", "normal"),
                                 raw=event_data,
@@ -1565,6 +1566,18 @@ class AstrBotApiClient:
             pass
         except Exception as e:
             yield SSEEvent(event_type="error", data=f"发送消息异常: {e}")
+
+    @staticmethod
+    def _normalize_sse_data_value(raw_data: Any) -> str:
+        """将 SSE data 统一转换为稳定的字符串表示。"""
+        if raw_data is None:
+            return ""
+        if isinstance(raw_data, str):
+            return raw_data
+        try:
+            return json.dumps(raw_data, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return str(raw_data)
 
     async def send_text_message(
         self,
