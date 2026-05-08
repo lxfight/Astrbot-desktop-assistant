@@ -1566,8 +1566,10 @@ class AstrBotApiClient:
     async def download_file(self, filename: str, save_path: str) -> bool:
         """下载文件"""
         try:
-            client = await self._ensure_client()
+            if self.uses_openapi:
+                return await self.get_attachment(filename, save_path)
 
+            client = await self._ensure_client()
             response = await client.get(
                 f"{self.api_base}/chat/get_file",
                 params={"filename": filename},
@@ -1593,9 +1595,14 @@ class AstrBotApiClient:
         """下载附件"""
         try:
             client = await self._ensure_client()
+            endpoint = (
+                f"{self.openapi_base}/file"
+                if self.uses_openapi
+                else f"{self.api_base}/chat/get_attachment"
+            )
 
             response = await client.get(
-                f"{self.api_base}/chat/get_attachment",
+                endpoint,
                 params={"attachment_id": attachment_id},
                 headers=self._get_headers(),
             )

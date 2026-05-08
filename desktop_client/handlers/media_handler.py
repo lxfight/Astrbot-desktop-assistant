@@ -125,6 +125,14 @@ class MediaHandler(QObject):
         dir_path = self._storage_dirs.get(msg_type, self._storage_dirs.get("file", ""))
         return os.path.join(dir_path, filename)
 
+    @staticmethod
+    def _resolve_download_name(filename: str, metadata: Optional[dict]) -> str:
+        if isinstance(metadata, dict):
+            attachment_id = metadata.get("attachment_id") or metadata.get("id")
+            if attachment_id:
+                return str(attachment_id)
+        return filename
+
     def handle_image_response(
         self, filename: str, metadata: dict, should_silent: bool = False
     ) -> None:
@@ -172,6 +180,7 @@ class MediaHandler(QObject):
             msg_type: 消息类型
             should_silent: 是否静默处理
         """
+        download_name = self._resolve_download_name(filename, metadata)
         save_path = self.get_save_path(filename, msg_type)
 
         # 检查是否是主动对话的响应
@@ -195,7 +204,7 @@ class MediaHandler(QObject):
             logger.error("MessageBridge 未设置")
             return
 
-        success = await self._bridge.api_client.download_file(filename, save_path)
+        success = await self._bridge.api_client.download_file(download_name, save_path)
 
         if success and os.path.exists(save_path):
             content = save_path

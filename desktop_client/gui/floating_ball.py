@@ -34,6 +34,7 @@ from PySide6.QtGui import (
     QBrush,
     QColor,
     QMouseEvent,
+    QResizeEvent,
     QPen,
     QRadialGradient,
     QPainterPath,
@@ -162,7 +163,7 @@ class CompactChatWindow(QWidget):
     window_moved = Signal(int, int)  # delta_x, delta_y - 窗口移动时发射
     window_resized = Signal()  # 窗口大小改变时发射
 
-    def __init__(self, parent=None, max_history: int = 50, config=None):
+    def __init__(self, parent=None, max_history: int = 0, config=None):
         super().__init__(parent)
         self._config = config
         self._always_on_top = True
@@ -176,7 +177,7 @@ class CompactChatWindow(QWidget):
         self.setWindowFlags(flags)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
-        self._max_history = max_history
+        self._max_history = max(0, max_history)
         self._message_history = []  # [(msg_type, content, is_user), ...]
         self._attachment_path = None
         self._is_waiting = False
@@ -370,6 +371,7 @@ class CompactChatWindow(QWidget):
         self._input.setPlaceholderText("输入消息...")
         self._input.setMinimumHeight(40)
         self._input.setMaximumHeight(120)
+        self._input.setCursor(Qt.CursorShape.IBeamCursor)
         self._input.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
         )
@@ -1655,14 +1657,15 @@ class CompactChatWindow(QWidget):
         # 直接添加到布局末尾（stretch 在开头，消息在后面）
         self._history_layout.addWidget(widget)
 
-        # 限制历史数量（从 stretch 后的第一个 widget 开始删除，即索引 1）
-        while self._history_layout.count() > self._max_history + 1:  # +1 for stretch
-            item = self._history_layout.itemAt(1)  # 跳过 stretch（索引 0）
-            if item:
-                w = item.widget()
-                if w:
-                    self._history_layout.removeWidget(w)
-                    w.deleteLater()
+        # max_history=0 表示聊天窗口不裁剪显示历史，由 ChatHistoryManager 控制持久化上限。
+        if self._max_history > 0:
+            while self._history_layout.count() > self._max_history + 1:
+                item = self._history_layout.itemAt(1)
+                if item:
+                    w = item.widget()
+                    if w:
+                        self._history_layout.removeWidget(w)
+                        w.deleteLater()
 
         # 延迟更新布局，确保widget已完成布局
         QTimer.singleShot(10, self._update_geometry)
@@ -1812,6 +1815,10 @@ class CompactChatWindow(QWidget):
                 self.setCursor(Qt.CursorShape.ArrowCursor)
             super().mouseMoveEvent(event)
 
+    def resizeEvent(self, event: QResizeEvent):
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        super().resizeEvent(event)
+
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._resizing = False
@@ -1826,6 +1833,9 @@ class CompactChatWindow(QWidget):
         w = self.width()
         h = self.height()
         m = self._resize_margin
+
+        if x < 0 or y < 0 or x > w or y > h:
+            return None
 
         edge = ""
         if y < m:
@@ -1889,6 +1899,7 @@ class CompactChatWindow(QWidget):
 
     def leaveEvent(self, event):
         """鼠标离开时重启自动隐藏"""
+        self.setCursor(Qt.CursorShape.ArrowCursor)
         if self._auto_hide_enabled and self.isVisible():
             self._auto_hide_timer.start(self._auto_hide_duration)
         super().leaveEvent(event)

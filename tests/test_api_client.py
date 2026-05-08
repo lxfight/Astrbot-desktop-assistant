@@ -126,6 +126,30 @@ class TestAstrBotApiClientOpenApiMode:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
+    async def test_openapi_download_file_uses_v1_attachment_endpoint(self, tmp_path: Path):
+        save_path = tmp_path / "downloaded.jpg"
+        client = AstrBotApiClient(
+            "http://localhost:6185",
+            username="alice",
+            api_key="abk_test",
+        )
+        response = MagicMock(status_code=200)
+        response.content = b"image-bytes"
+        http_client = MagicMock()
+        http_client.get = AsyncMock(return_value=response)
+        client._ensure_client = AsyncMock(return_value=http_client)
+
+        success = await client.download_file("attachment_123", str(save_path))
+
+        assert success is True
+        assert save_path.read_bytes() == b"image-bytes"
+        http_client.get.assert_awaited_once()
+        args, kwargs = http_client.get.call_args
+        assert args[0] == "http://localhost:6185/api/v1/file"
+        assert kwargs["params"] == {"attachment_id": "attachment_123"}
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
     async def test_openapi_send_message_hits_v1_chat_and_injects_username(self):
         client = AstrBotApiClient(
             "http://localhost:6185",

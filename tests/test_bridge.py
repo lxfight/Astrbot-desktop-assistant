@@ -556,6 +556,102 @@ class TestMessageBridgeSSEEventHandling:
             assert received_messages[0].content == "image_123.png"
 
     @pytest.mark.unit
+    def test_handle_image_event_preserves_attachment_id(
+        self, mock_qt_app, sample_config: ClientConfig
+    ):
+        """测试保留 OpenAPI 附件 ID 供后续下载"""
+        with patch("desktop_client.bridge.AstrBotApiClient"):
+            bridge = MessageBridge(sample_config)
+
+            received_messages = []
+            bridge.message_received.connect(lambda msg: received_messages.append(msg))
+
+            event = SSEEvent(
+                event_type="image",
+                data="[IMAGE]image_123.png",
+                raw={
+                    "type": "image",
+                    "data": {
+                        "filename": "image_123.png",
+                        "attachment_id": "att_123",
+                    },
+                },
+            )
+
+            bridge._handle_sse_event(event, "session_123")
+
+            assert received_messages[0].metadata["filename"] == "image_123.png"
+            assert received_messages[0].metadata["attachment_id"] == "att_123"
+
+    @pytest.mark.unit
+    def test_openapi_image_event_waits_for_attachment_saved(
+        self, mock_qt_app, sample_config: ClientConfig
+    ):
+        """测试 OpenAPI 图片事件等待 attachment_saved 补全附件 ID"""
+        with patch("desktop_client.bridge.AstrBotApiClient"):
+            bridge = MessageBridge(sample_config)
+            bridge.api_client.uses_openapi = True
+
+            received_messages = []
+            bridge.message_received.connect(lambda msg: received_messages.append(msg))
+
+            bridge._handle_sse_event(
+                SSEEvent(event_type="image", data="[IMAGE]image_123.png"),
+                "session_123",
+                "req_1",
+            )
+
+            assert received_messages == []
+
+            bridge._handle_sse_event(
+                SSEEvent(
+                    event_type="attachment_saved",
+                    data='{"id": "att_123", "type": "image"}',
+                    raw={
+                        "type": "attachment_saved",
+                        "data": {
+                            "id": "att_123",
+                            "type": "image",
+                        },
+                    },
+                ),
+                "session_123",
+                "req_1",
+            )
+
+            assert len(received_messages) == 1
+            assert received_messages[0].msg_type == "image"
+            assert received_messages[0].content == "image_123.png"
+            assert received_messages[0].metadata["attachment_id"] == "att_123"
+
+    @pytest.mark.unit
+    def test_openapi_pending_image_flushes_on_end_without_attachment_saved(
+        self, mock_qt_app, sample_config: ClientConfig
+    ):
+        """测试 attachment_saved 缺失时不会吞掉媒体消息"""
+        with patch("desktop_client.bridge.AstrBotApiClient"):
+            bridge = MessageBridge(sample_config)
+            bridge.api_client.uses_openapi = True
+
+            received_messages = []
+            bridge.message_received.connect(lambda msg: received_messages.append(msg))
+
+            bridge._handle_sse_event(
+                SSEEvent(event_type="image", data="[IMAGE]image_123.png"),
+                "session_123",
+                "req_1",
+            )
+            bridge._handle_sse_event(
+                SSEEvent(event_type="end", data=""),
+                "session_123",
+                "req_1",
+            )
+
+            assert [msg.msg_type for msg in received_messages] == ["image", "end"]
+            assert received_messages[0].content == "image_123.png"
+            assert "attachment_id" not in received_messages[0].metadata
+
+    @pytest.mark.unit
     def test_handle_record_event(self, mock_qt_app, sample_config: ClientConfig):
         """测试处理语音事件"""
         with patch("desktop_client.bridge.AstrBotApiClient"):

@@ -79,6 +79,7 @@ class MessageBridge(QObject):
         self._current_request_id: Optional[str] = None
         # 请求锁：确保同一时间只有一个请求在处理
         self._request_lock = asyncio.Lock()
+        self._pending_media_events: dict[str, list[OutputMessage]] = {}
 
     def _on_api_state_change(self, state: ConnectionState):
         """API 客户端状态变化回调"""
@@ -250,6 +251,8 @@ class MessageBridge(QObject):
                 )
             )
         finally:
+            if self._current_request_id:
+                self._flush_pending_media_events(self._current_request_id)
             # 清除当前请求ID
             self._current_request_id = None
 
@@ -298,8 +301,8 @@ class MessageBridge(QObject):
 
         elif event.event_type == "image":
             filename = event.data.replace("[IMAGE]", "")
-            metadata = {**base_metadata, "filename": filename}
-            self.message_received.emit(
+            metadata = self._build_media_metadata(event, base_metadata, filename)
+            self._emit_or_queue_media_message(
                 OutputMessage(
                     msg_type="image",
                     content=filename,
@@ -310,8 +313,8 @@ class MessageBridge(QObject):
 
         elif event.event_type == "record":
             filename = event.data.replace("[RECORD]", "")
-            metadata = {**base_metadata, "filename": filename}
-            self.message_received.emit(
+            metadata = self._build_media_metadata(event, base_metadata, filename)
+            self._emit_or_queue_media_message(
                 OutputMessage(
                     msg_type="voice",
                     content=filename,
@@ -322,8 +325,8 @@ class MessageBridge(QObject):
 
         elif event.event_type == "file":
             filename = event.data.replace("[FILE]", "")
-            metadata = {**base_metadata, "filename": filename}
-            self.message_received.emit(
+            metadata = self._build_media_metadata(event, base_metadata, filename)
+            self._emit_or_queue_media_message(
                 OutputMessage(
                     msg_type="file",
                     content=filename,
@@ -333,6 +336,7 @@ class MessageBridge(QObject):
             )
 
         elif event.event_type in ("end", "complete"):
+            self._flush_pending_media_events(base_metadata.get("request_id"))
             self.message_received.emit(
                 OutputMessage(
                     msg_type="end",
@@ -344,6 +348,7 @@ class MessageBridge(QObject):
             )
 
         elif event.event_type == "break":
+            self._flush_pending_media_events(base_metadata.get("request_id"))
             metadata = {**base_metadata, "break": True}
             self.message_received.emit(
                 OutputMessage(
@@ -372,7 +377,11 @@ class MessageBridge(QObject):
                 )
             )
 
+        elif event.event_type == "attachment_saved":
+            self._handle_attachment_saved_event(event, base_metadata)
+
         elif event.event_type == "error":
+            self._flush_pending_media_events(base_metadata.get("request_id"))
             self.message_received.emit(
                 OutputMessage(
                     msg_type="error",
@@ -475,6 +484,87 @@ class MessageBridge(QObject):
             except (TypeError, ValueError):
                 return str(value)
         return str(value)
+
+    def _emit_or_queue_media_message(self, message: OutputMessage) -> None:
+        """OpenAPI 的媒体事件会先到，attachment_id 可能随后由 attachment_saved 补发。"""
+        metadata = message.metadata
+        if metadata.get("attachment_id") or metadata.get("id"):
+            self.message_received.emit(message)
+            return
+
+        if self.api_client.uses_openapi:
+            request_id = metadata.get("request_id")
+            if request_id:
+                self._pending_media_events.setdefault(str(request_id), []).append(
+                    message
+                )
+                return
+
+        self.message_received.emit(message)
+
+    def _flush_pending_media_events(self, request_id: Optional[str]) -> None:
+        """终止前放行未配对媒体, 避免 OpenAPI 少发 attachment_saved 时消息静默消失。"""
+        if not request_id:
+            return
+
+        pending = self._pending_media_events.pop(str(request_id), [])
+        for message in pending:
+            self.message_received.emit(message)
+
+    def _handle_attachment_saved_event(
+        self, event: SSEEvent, base_metadata: dict
+    ) -> None:
+        raw_data = (event.raw or {}).get("data") if isinstance(event.raw, dict) else None
+        if not isinstance(raw_data, dict):
+            return
+
+        attachment_id = raw_data.get("attachment_id") or raw_data.get("id")
+        if not attachment_id:
+            return
+
+        request_id = base_metadata.get("request_id")
+        if not request_id:
+            return
+
+        pending = self._pending_media_events.get(str(request_id))
+        if not pending:
+            return
+
+        target_type = raw_data.get("type")
+        for index, message in enumerate(pending):
+            if target_type and message.msg_type == "voice" and target_type != "record":
+                continue
+            if target_type and message.msg_type != "voice" and message.msg_type != target_type:
+                continue
+
+            metadata = {
+                **message.metadata,
+                "attachment_id": attachment_id,
+                "id": attachment_id,
+            }
+            if raw_data.get("type"):
+                metadata["type"] = raw_data["type"]
+            if raw_data.get("filename"):
+                metadata["filename"] = raw_data["filename"]
+            message.metadata = metadata
+            pending.pop(index)
+            if not pending:
+                self._pending_media_events.pop(str(request_id), None)
+            self.message_received.emit(message)
+            return
+
+    def _build_media_metadata(
+        self, event: SSEEvent, base_metadata: dict, filename: str
+    ) -> dict:
+        """提取媒体事件中的下载标识。"""
+        metadata = {**base_metadata, "filename": filename}
+        raw_data = (event.raw or {}).get("data") if isinstance(event.raw, dict) else None
+        if isinstance(raw_data, dict):
+            for key in ("attachment_id", "id", "filename", "type"):
+                value = raw_data.get(key)
+                if value:
+                    metadata[key] = value
+        return metadata
 
     def update_server_config(
         self,
