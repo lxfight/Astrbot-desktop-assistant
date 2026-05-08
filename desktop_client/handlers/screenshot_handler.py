@@ -44,10 +44,11 @@ class ScreenshotHandler(QObject):
         self._config = config
         self._floating_ball = floating_ball
         self._capture = None  # 区域截图捕获对象
-        
+
         # 保存窗口原始位置
         self._ball_pos: Optional[QPoint] = None
         self._chat_pos: Optional[QPoint] = None
+        self._window_capture_state: Optional[dict] = None
 
     def set_floating_ball(self, floating_ball: Any) -> None:
         """设置悬浮球实例"""
@@ -158,9 +159,14 @@ class ScreenshotHandler(QObject):
     def _hide_windows(self) -> None:
         """隐藏窗口并记录状态"""
         if self._floating_ball:
+            prepare = getattr(self._floating_ball, "prepare_for_screen_capture", None)
+            if callable(prepare):
+                self._window_capture_state = prepare()
+                return
+
             # 记录聊天窗口状态
             self._chat_window_was_visible = self._floating_ball._compact_window.isVisible()
-            
+
             # 记录当前位置
             self._ball_pos = self._floating_ball.pos()
             self._chat_pos = self._floating_ball._compact_window.pos()
@@ -169,39 +175,45 @@ class ScreenshotHandler(QObject):
             # 1. 设置透明度为0
             # 2. 移动到屏幕可视区域外
             # 3. 调用 hide()
-            
+
             self._floating_ball.setWindowOpacity(0)
             self._floating_ball._compact_window.setWindowOpacity(0)
-            
+
             # 移出屏幕 (足够远的位置)
             self._floating_ball.move(-10000, -10000)
             # 由于 FloatingBallWindow 实现了 moveEvent，上面的移动会自动触发 compact_window 的移动
             # 但为了保险起见，我们还是显式移动一次 (如果是隐藏状态 moveEvent 可能不触发)
             self._floating_ball._compact_window.move(-10000, -10000)
-            
+
             # 强制刷新UI事件循环，确保窗口移动被系统处理
             QApplication.processEvents()
-            
+
             # 最后再隐藏 (防止闪烁)
             self._floating_ball._compact_window.hide()
             self._floating_ball.hide()
-            
+
             # 再次刷新
             QApplication.processEvents()
 
     def _restore_windows(self) -> None:
         """恢复窗口显示"""
         if self._floating_ball:
+            restore = getattr(self._floating_ball, "restore_after_screen_capture", None)
+            if callable(restore):
+                restore(self._window_capture_state)
+                self._window_capture_state = None
+                return
+
             # 恢复位置
             if self._ball_pos:
                 self._floating_ball.move(self._ball_pos)
             if self._chat_pos:
                 self._floating_ball._compact_window.move(self._chat_pos)
-                
+
             # 恢复透明度
             self._floating_ball.setWindowOpacity(1)
             self._floating_ball._compact_window.setWindowOpacity(1)
-            
+
             self._floating_ball.show()
             # 恢复聊天窗口显示状态
             if getattr(self, '_chat_window_was_visible', False):

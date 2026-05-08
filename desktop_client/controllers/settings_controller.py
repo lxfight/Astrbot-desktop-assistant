@@ -101,6 +101,9 @@ class SettingsController(QObject):
         # 更新交互配置
         self._update_interaction_settings(settings.get("interaction", {}))
 
+        # 更新桌宠运行时配置
+        self._update_pet_runtime_settings(settings.get("pet_runtime", {}))
+
         # 更新主动对话配置
         self._update_proactive_settings(settings.get("proactive", {}))
 
@@ -271,6 +274,38 @@ class SettingsController(QObject):
             self._config.interaction.bubble_auto_hide = interaction["bubble_auto_hide"]
         if "do_not_disturb" in interaction:
             self._config.interaction.do_not_disturb = interaction["do_not_disturb"]
+
+    def _update_pet_runtime_settings(self, pet_runtime: Dict[str, Any]) -> None:
+        """
+        更新桌宠运行时配置
+
+        Args:
+            pet_runtime: 桌宠运行时设置字典
+        """
+        if not pet_runtime or not hasattr(self._config, "pet_runtime"):
+            return
+
+        for key, value in pet_runtime.items():
+            if hasattr(self._config.pet_runtime, key):
+                setattr(self._config.pet_runtime, key, value)
+
+        if (
+            self._floating_ball
+            and hasattr(self._floating_ball, "update_pet_runtime_config")
+            and pet_runtime.get("display_mode", self._config.pet_runtime.display_mode)
+            == "pet"
+        ):
+            self._floating_ball.update_pet_runtime_config(self._config)
+
+        if (
+            self._floating_ball
+            and "display_mode" in pet_runtime
+            and (
+                not hasattr(self._floating_ball, "update_pet_runtime_config")
+                or pet_runtime.get("display_mode") == "ball"
+            )
+        ):
+            self._floating_ball.show_system_message("桌面形象切换将在重启后生效")
 
     def _update_proactive_settings(self, proactive: Dict[str, Any]) -> None:
         """

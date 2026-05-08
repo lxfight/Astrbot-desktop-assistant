@@ -121,3 +121,42 @@ class TestSettingsController:
         assert result is True
         assert sample_config.server.api_key == "abk_new"
         bridge.update_server_config.assert_called_once()
+
+    @pytest.mark.unit
+    def test_pet_runtime_settings_update_config_and_window(self, sample_config):
+        floating_ball = MagicMock()
+        controller = SettingsController(
+            config=sample_config,
+            floating_ball=floating_ball,
+        )
+
+        controller._update_pet_runtime_settings(
+            {
+                "enabled": True,
+                "display_mode": "pet",
+                "current_pet_id": "taotao",
+                "window_scale": 1.2,
+                "always_on_top": False,
+            }
+        )
+
+        assert sample_config.pet_runtime.display_mode == "pet"
+        assert sample_config.pet_runtime.current_pet_id == "taotao"
+        assert sample_config.pet_runtime.window_scale == 1.2
+        assert sample_config.pet_runtime.always_on_top is False
+        floating_ball.update_pet_runtime_config.assert_called_once_with(sample_config)
+
+    @pytest.mark.unit
+    def test_pet_runtime_ball_mode_prompts_restart(self, sample_config):
+        floating_ball = MagicMock()
+        controller = SettingsController(
+            config=sample_config,
+            floating_ball=floating_ball,
+        )
+
+        controller._update_pet_runtime_settings({"display_mode": "ball"})
+
+        assert sample_config.pet_runtime.display_mode == "ball"
+        floating_ball.show_system_message.assert_called_once_with(
+            "桌面形象切换将在重启后生效"
+        )

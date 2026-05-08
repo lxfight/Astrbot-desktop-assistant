@@ -24,6 +24,7 @@ from .config import (
     ServerConfig,
     AppearanceConfig,
     ChatWindowConfig,
+    PetRuntimeConfig,
     VoiceConfig,
 )
 from .api_client import (
@@ -55,6 +56,7 @@ __all__ = [
     "ServerConfig",
     "AppearanceConfig",
     "ChatWindowConfig",
+    "PetRuntimeConfig",
     "VoiceConfig",
     # API 客户端
     "AstrBotApiClient",

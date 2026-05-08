@@ -154,20 +154,21 @@ class MessageHandler(QObject):
             return
 
         from ..api_client import ConnectionState
-        from ..gui.floating_ball import FloatingBallState
 
         # content 是 ConnectionState 的 value
         if content == ConnectionState.DISCONNECTED.value:
-            self._floating_ball.set_state(FloatingBallState.DISCONNECTED)
+            self._set_runtime_state("disconnected")
+            self._emit_pet_event("failure", "与服务器断开连接")
             self._show_status_notice_once("❌ 与服务器断开连接")
         elif content == ConnectionState.CONNECTED.value:
-            self._floating_ball.set_state(FloatingBallState.NORMAL)
+            self._set_runtime_state("normal")
+            self._emit_pet_event("success", "已连接到服务器")
             self._show_status_notice_once("✅ 已连接到服务器")
         elif content == ConnectionState.CONNECTING.value:
-            # 连接中，暂不处理，保持当前状态或显示加载动画
-            pass
+            self._emit_pet_event("thinking")
         elif content == ConnectionState.ERROR.value:
-            self._floating_ball.set_state(FloatingBallState.DISCONNECTED)
+            self._set_runtime_state("disconnected")
+            self._emit_pet_event("failure", "连接出错")
 
     def _show_status_notice_once(self, text: str) -> None:
         now = time.monotonic()
@@ -245,10 +246,12 @@ class MessageHandler(QObject):
                         content, metadata=combined_metadata
                     )
                     self._floating_ball.finish_response()
+                    self._emit_pet_event("success")
                     if not self._is_chat_window_visible():
                         self._floating_ball.set_unread_message(True)
                 else:
                     self._floating_ball.show_bubble(content, metadata=message_metadata)
+                    self._emit_pet_event("success")
             else:
                 # 没有 UI 实例，直接写入历史
                 if self._chat_history_manager:
@@ -303,6 +306,7 @@ class MessageHandler(QObject):
 
         if self._floating_ball and self._has_active_response():
             self._floating_ball.finish_response()
+            self._emit_pet_event("success")
             if not self._is_chat_window_visible():
                 self._floating_ball.set_unread_message(True)
         elif self._streaming_response_buffer and self._chat_history_manager:
@@ -354,6 +358,7 @@ class MessageHandler(QObject):
                     self._floating_ball.set_unread_message(True)
             else:
                 self._floating_ball.show_bubble(f"❌ {content}")
+            self._emit_pet_event("failure")
         elif self._chat_history_manager:
             self._chat_history_manager.add_message(
                 role="assistant", content=f"❌ {content}", msg_type="text"
@@ -485,3 +490,25 @@ class MessageHandler(QObject):
         if callable(checker):
             return bool(checker())
         return False
+
+    def _set_runtime_state(self, state_value: str) -> None:
+        if not self._floating_ball:
+            return
+
+        setter = getattr(self._floating_ball, "set_state", None)
+        if not callable(setter):
+            return
+
+        try:
+            from ..gui.floating_ball import FloatingBallState
+
+            setter(FloatingBallState(state_value))
+        except Exception:
+            setter(state_value)
+
+    def _emit_pet_event(self, event_type: str, message: str = "") -> None:
+        if not self._floating_ball:
+            return
+        emitter = getattr(self._floating_ball, "emit_event", None)
+        if callable(emitter):
+            emitter(event_type, message)

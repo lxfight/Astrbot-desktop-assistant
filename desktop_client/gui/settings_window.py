@@ -9,6 +9,7 @@
 """
 
 import os
+from pathlib import Path
 from typing import Optional, Dict
 
 from PySide6.QtGui import QPixmap, QColor
@@ -16,9 +17,11 @@ from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
+    QGridLayout,
     QLabel,
     QLineEdit,
     QPushButton,
+    QToolButton,
     QFrame,
     QScrollArea,
     QComboBox,
@@ -39,6 +42,7 @@ from ..api_client import AstrBotApiClient
 from ..utils.autostart import is_autostart_enabled, set_autostart
 from ..services import get_chat_history_manager
 from ..config import ClientConfig, CustomThemeConfig, save_config
+from ..pet_runtime.catalog import PetCatalog
 from .themes import theme_manager, Theme
 from .icons import icon_manager
 from .hotkeys import HotkeyConfig, hotkey_manager
@@ -199,6 +203,10 @@ class SettingsWindow(QWidget):
     def __init__(self, config: Optional[ClientConfig] = None, parent=None):
         super().__init__(parent)
         self.config = config if config is not None else ClientConfig()
+        pet_config = getattr(self.config, "pet_runtime", None)
+        self._selected_pet_id = getattr(pet_config, "current_pet_id", "taotao")
+        self._pet_cards: Dict[str, QToolButton] = {}
+        self._pet_catalog = self._build_pet_catalog()
 
         self.setWindowTitle("设置")
         self.setMinimumSize(500, 600)
@@ -366,6 +374,60 @@ class SettingsWindow(QWidget):
         theme_section.add_row("主题", self._theme_combo)
 
         layout.addWidget(theme_section)
+
+        # 桌面形象设置
+        desktop_avatar_section = SettingsSection("桌面形象")
+
+        self._desktop_avatar_mode = QComboBox()
+        self._desktop_avatar_mode.addItem("Q版宠物形象", "pet")
+        self._desktop_avatar_mode.addItem("悬浮球", "ball")
+        self._desktop_avatar_mode.setToolTip("切换桌面入口形态，保存后重启生效")
+        desktop_avatar_section.add_row("显示形态", self._desktop_avatar_mode)
+
+        self._pet_scale = QDoubleSpinBox()
+        self._pet_scale.setRange(0.6, 2.0)
+        self._pet_scale.setSingleStep(0.1)
+        self._pet_scale.setValue(1.0)
+        self._pet_scale.setToolTip("Q版宠物窗口缩放比例")
+        desktop_avatar_section.add_row("宠物缩放", self._pet_scale)
+
+        self._pet_always_on_top = QCheckBox("宠物窗口置顶")
+        self._pet_always_on_top.setChecked(True)
+        desktop_avatar_section.add_widget(self._pet_always_on_top)
+
+        layout.addWidget(desktop_avatar_section)
+
+        # 宠物形象商店
+        pet_section = SettingsSection("宠物形象")
+
+        pet_toolbar = QFrame()
+        pet_toolbar_layout = QHBoxLayout(pet_toolbar)
+        pet_toolbar_layout.setContentsMargins(0, 0, 0, 0)
+        pet_toolbar_layout.setSpacing(8)
+
+        pet_hint = QLabel("选择或导入 Codex-compatible 宠物包")
+        pet_hint.setObjectName("settingLabel")
+        pet_hint.setWordWrap(True)
+
+        self._import_pet_btn = QPushButton("添加宠物形象")
+        self._import_pet_btn.setIcon(icon_manager.get_icon("plus", "#409EFF", 16))
+        self._import_pet_btn.setIconSize(QSize(16, 16))
+        self._import_pet_btn.clicked.connect(self._on_import_pet_package)
+
+        pet_toolbar_layout.addWidget(pet_hint, 1)
+        pet_toolbar_layout.addWidget(self._import_pet_btn)
+        pet_section.add_widget(pet_toolbar)
+
+        self._pet_grid_container = QFrame()
+        self._pet_grid_container.setObjectName("petGrid")
+        self._pet_grid = QGridLayout(self._pet_grid_container)
+        self._pet_grid.setContentsMargins(0, 0, 0, 0)
+        self._pet_grid.setHorizontalSpacing(10)
+        self._pet_grid.setVerticalSpacing(10)
+        pet_section.add_widget(self._pet_grid_container)
+
+        layout.addWidget(pet_section)
+        self._refresh_pet_cards()
 
         # 头像设置
         avatar_section = SettingsSection("头像设置")
@@ -604,6 +666,88 @@ class SettingsWindow(QWidget):
         tab_layout.addWidget(scroll_area)
 
         return tab
+
+    def _build_pet_catalog(self) -> PetCatalog:
+        """构建宠物形象目录"""
+        pet_config = getattr(self.config, "pet_runtime", None)
+        user_dir = None
+        if pet_config:
+            user_dir = Path(pet_config.resolved_pet_packages_dir)
+        return PetCatalog(user_dir=user_dir)
+
+    def _refresh_pet_cards(self) -> None:
+        """刷新宠物形象卡片"""
+        if not hasattr(self, "_pet_grid"):
+            return
+
+        while self._pet_grid.count():
+            item = self._pet_grid.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+
+        self._pet_catalog.refresh()
+        self._pet_cards.clear()
+        pets = list(self._pet_catalog.pets.values())
+
+        if not pets:
+            empty = QLabel("未发现可用宠物包")
+            empty.setObjectName("settingLabel")
+            self._pet_grid.addWidget(empty, 0, 0)
+            return
+
+        if not self._selected_pet_id or self._selected_pet_id not in self._pet_catalog.pets:
+            self._selected_pet_id = pets[0].id
+
+        for index, pet in enumerate(pets):
+            card = QToolButton()
+            card.setObjectName("petCard")
+            card.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+            card.setCheckable(True)
+            card.setChecked(pet.id == self._selected_pet_id)
+            card.setText(pet.display_name)
+            card.setToolTip(pet.description or pet.display_name)
+            card.setIcon(self._pet_preview_icon(pet.spritesheet_path))
+            card.setIconSize(QSize(96, 104))
+            card.setFixedSize(128, 154)
+            card.clicked.connect(lambda checked=False, pet_id=pet.id: self._select_pet(pet_id))
+
+            self._pet_cards[pet.id] = card
+            self._pet_grid.addWidget(card, index // 3, index % 3)
+
+        self._update_pet_card_styles()
+
+    def _pet_preview_icon(self, spritesheet_path: Path):
+        """从 spritesheet 第一帧生成预览图标"""
+        pixmap = QPixmap(str(spritesheet_path))
+        if pixmap.isNull():
+            c = theme_manager.get_current_colors()
+            return icon_manager.get_icon("bot", c.text_primary, 64)
+
+        frame_width = pixmap.width() // 8 if pixmap.width() >= 8 else pixmap.width()
+        frame_height = pixmap.height() // 9 if pixmap.height() >= 9 else pixmap.height()
+        frame = pixmap.copy(0, 0, frame_width, frame_height)
+        frame = frame.scaled(
+            96,
+            104,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        from PySide6.QtGui import QIcon
+
+        return QIcon(frame)
+
+    def _select_pet(self, pet_id: str) -> None:
+        """选择当前宠物形象"""
+        if pet_id not in self._pet_catalog.pets:
+            return
+        self._selected_pet_id = pet_id
+        self._update_pet_card_styles()
+
+    def _update_pet_card_styles(self) -> None:
+        """同步宠物卡片选中态"""
+        for pet_id, card in self._pet_cards.items():
+            card.setChecked(pet_id == self._selected_pet_id)
 
     def _create_hotkeys_tab(self) -> QWidget:
         """创建快捷键设置标签页"""
@@ -1766,7 +1910,24 @@ class SettingsWindow(QWidget):
                 border-radius: 32px;
                 font-size: 32px;
             }}
-            
+
+            QToolButton#petCard {{
+                background-color: {c.bg_primary};
+                border: 1px solid {c.border_light};
+                border-radius: {t.border_radius}px;
+                color: {c.text_primary};
+                padding: 8px;
+            }}
+            QToolButton#petCard:hover {{
+                background-color: {c.bg_hover};
+                border-color: {c.primary};
+            }}
+            QToolButton#petCard:checked {{
+                background-color: {c.primary_light};
+                border: 2px solid {c.primary};
+                color: white;
+            }}
+
             QPushButton {{
                 background-color: {c.bg_secondary};
                 border: 1px solid {c.border_light};
@@ -2009,6 +2170,20 @@ class SettingsWindow(QWidget):
             self._user_avatar_path = ""
             self._bot_avatar_path = ""
             self._bg_image_path = ""
+
+        # 桌宠运行时设置
+        if hasattr(self.config, "pet_runtime"):
+            pet_config = self.config.pet_runtime
+            display_mode = getattr(pet_config, "display_mode", "pet")
+            self._desktop_avatar_mode.setCurrentIndex(
+                max(0, self._desktop_avatar_mode.findData(display_mode))
+            )
+            self._pet_scale.setValue(float(getattr(pet_config, "window_scale", 1.0)))
+            self._pet_always_on_top.setChecked(
+                bool(getattr(pet_config, "always_on_top", True))
+            )
+            self._selected_pet_id = getattr(pet_config, "current_pet_id", "taotao")
+            self._refresh_pet_cards()
 
         # 主题设置
         current_theme = theme_manager.current_theme.name
@@ -2332,6 +2507,31 @@ class SettingsWindow(QWidget):
         )
         self._bot_avatar_path = ""
 
+    def _on_import_pet_package(self):
+        """导入本地 Codex-compatible 宠物包"""
+        source = QFileDialog.getExistingDirectory(
+            self,
+            "选择宠物包目录",
+            "",
+        )
+        if not source:
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "选择宠物包 manifest 或 spritesheet",
+                "",
+                "宠物包文件 (pet.json spritesheet.webp);;所有文件 (*)",
+            )
+            source = file_path
+        if not source:
+            return
+
+        try:
+            imported = self._pet_catalog.import_local(source, force=True)
+            self._selected_pet_id = imported.id
+            self._refresh_pet_cards()
+        except Exception as e:
+            QMessageBox.warning(self, "导入宠物形象失败", str(e))
+
     def _on_upload_background(self):
         """上传背景图片"""
         file_path, _ = QFileDialog.getOpenFileName(
@@ -2501,6 +2701,13 @@ class SettingsWindow(QWidget):
             "voice": {
                 "auto_play_voice": self._auto_play_voice.isChecked(),
             },
+            "pet_runtime": {
+                "enabled": True,
+                "display_mode": self._desktop_avatar_mode.currentData() or "pet",
+                "current_pet_id": self._selected_pet_id or "taotao",
+                "window_scale": self._pet_scale.value(),
+                "always_on_top": self._pet_always_on_top.isChecked(),
+            },
             "proactive": {
                 "enabled": self._proactive_enabled.isChecked(),
                 "check_interval": self._proactive_check_interval.value(),
@@ -2600,6 +2807,22 @@ class SettingsWindow(QWidget):
 
             # 语音
             self.config.voice.auto_play_voice = settings["voice"]["auto_play_voice"]
+
+            # 桌宠运行时
+            if hasattr(self.config, "pet_runtime"):
+                self.config.pet_runtime.enabled = settings["pet_runtime"]["enabled"]
+                self.config.pet_runtime.display_mode = settings["pet_runtime"][
+                    "display_mode"
+                ]
+                self.config.pet_runtime.current_pet_id = settings["pet_runtime"][
+                    "current_pet_id"
+                ]
+                self.config.pet_runtime.window_scale = settings["pet_runtime"][
+                    "window_scale"
+                ]
+                self.config.pet_runtime.always_on_top = settings["pet_runtime"][
+                    "always_on_top"
+                ]
 
             # 主动对话
             self.config.proactive.enabled = settings["proactive"]["enabled"]

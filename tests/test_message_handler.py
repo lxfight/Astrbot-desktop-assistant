@@ -35,6 +35,9 @@ class FakeFloatingBall:
     def show_system_message(self, text: str):
         self.calls.append(("system", text))
 
+    def emit_event(self, event_type: str, message: str = ""):
+        self.calls.append(("event", event_type, message))
+
     def has_active_response(self) -> bool:
         return self.active
 
@@ -79,6 +82,18 @@ class TestMessageHandler:
         )
 
         assert ("stream", "流式片段", {}) in floating_ball.calls
+        assert not any(call[:2] == ("event", "thinking") for call in floating_ball.calls)
+
+    @pytest.mark.unit
+    def test_connection_thinking_event_has_no_bubble_message(self, sample_config):
+        from desktop_client.api_client import ConnectionState
+
+        floating_ball = FakeFloatingBall()
+        handler = MessageHandler(config=sample_config, floating_ball=floating_ball)
+
+        handler._handle_status_message(ConnectionState.CONNECTING.value)
+
+        assert ("event", "thinking", "") in floating_ball.calls
 
     @pytest.mark.unit
     def test_new_request_finishes_stale_active_response(self, sample_config):

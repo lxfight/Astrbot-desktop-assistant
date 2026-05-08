@@ -489,11 +489,23 @@ class DesktopClientApp(QObject):
             except Exception as e:
                 logger.warning(f"应用自定义颜色配置失败，使用默认主题: {e}")
 
-        # 创建悬浮球
-        logger.debug("创建悬浮球...")
-        from .gui.floating_ball import FloatingBallWindow
+        # 创建桌宠窗口。默认使用 Codex-compatible pet runtime，旧悬浮球保留为 legacy mode。
+        pet_config = getattr(self.config, "pet_runtime", None)
+        use_pet_runtime = bool(
+            pet_config
+            and pet_config.enabled
+            and getattr(pet_config, "display_mode", "pet") == "pet"
+        )
+        if use_pet_runtime:
+            logger.debug("创建 Codex-compatible 桌宠运行时...")
+            from .pet_runtime.window import PetRuntimeWindow
 
-        self._floating_ball = FloatingBallWindow(config=self.config)
+            self._floating_ball = PetRuntimeWindow(config=self.config)
+        else:
+            logger.debug("创建 legacy 悬浮球...")
+            from .gui.floating_ball import FloatingBallWindow
+
+            self._floating_ball = FloatingBallWindow(config=self.config)
         self._floating_ball.clicked.connect(self._on_ball_clicked)
         self._floating_ball.double_clicked.connect(self._on_ball_double_clicked)
         self._floating_ball.settings_requested.connect(self._show_settings)
@@ -629,10 +641,16 @@ class DesktopClientApp(QObject):
             self._floating_ball.clear_unread_message()
 
         logger.debug("悬浮球双击：触发主动对话截图...")
+        if self._floating_ball and hasattr(self._floating_ball, "emit_event"):
+            self._floating_ball.emit_event("tool-running", "正在查看屏幕")
         self._screenshot_handler.do_proactive_screenshot()
 
     def _on_screenshot_captured(self, screenshot_path: str):
         """处理悬浮球截图完成后的文件路径。"""
+        if screenshot_path in {"region", "full"}:
+            self._screenshot_handler.on_screenshot(screenshot_path)
+            return
+
         if screenshot_path:
             self._screenshot_handler.add_screenshot_to_chat(screenshot_path)
 
@@ -670,6 +688,8 @@ class DesktopClientApp(QObject):
     @asyncSlot(str)
     async def _on_message_sent(self, message: str):
         """处理发送的消息 (Async Slot)"""
+        if self._floating_ball and hasattr(self._floating_ball, "emit_event"):
+            self._floating_ball.emit_event("thinking")
         await self._bridge.send_input(
             InputMessage(
                 msg_type="text",
@@ -681,6 +701,8 @@ class DesktopClientApp(QObject):
     @asyncSlot(str, str)
     async def _on_image_sent(self, image_path: str, text: str = ""):
         """处理发送的图片消息 (Async Slot)"""
+        if self._floating_ball and hasattr(self._floating_ball, "emit_event"):
+            self._floating_ball.emit_event("tool-running", "正在处理图片")
         await self._bridge.send_input(
             InputMessage(
                 msg_type="image",
@@ -810,6 +832,9 @@ class DesktopClientApp(QObject):
 
     def _quit(self):
         """退出应用"""
+        if self._floating_ball and hasattr(self._floating_ball, "close"):
+            self._floating_ball.close()
+
         if self._proactive_service:
             self._proactive_service.stop()
             logger.debug("主动对话服务已停止")

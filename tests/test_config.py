@@ -25,6 +25,7 @@ from desktop_client.config import (
     ChatWindowConfig,
     HotkeyConfigData,
     InteractionConfig,
+    PetRuntimeConfig,
     VoiceConfig,
     StorageConfig,
     ProactiveDialogConfig,
@@ -181,6 +182,25 @@ class TestProactiveDialogConfig:
         assert "桌面助手" in config.prompt_template
 
 
+class TestPetRuntimeConfig:
+    """PetRuntimeConfig 测试"""
+
+    @pytest.mark.unit
+    def test_default_values(self):
+        config = PetRuntimeConfig()
+
+        assert config.enabled is True
+        assert config.display_mode == "pet"
+        assert config.listen_host == "127.0.0.1"
+        assert config.listen_port == 17321
+        assert config.current_pet_id == "taotao"
+        assert config.pet_packages_dir == ""
+        assert config.window_scale == 1.0
+        assert config.always_on_top is True
+        assert config.bubble_ttl_ms == 4000
+        assert config.api_enabled is True
+
+
 class TestClientConfig:
     """ClientConfig 完整测试"""
 
@@ -193,6 +213,7 @@ class TestClientConfig:
         assert isinstance(default_config.voice, VoiceConfig)
         assert isinstance(default_config.hotkeys, HotkeyConfigData)
         assert isinstance(default_config.interaction, InteractionConfig)
+        assert isinstance(default_config.pet_runtime, PetRuntimeConfig)
         assert isinstance(default_config.proactive, ProactiveDialogConfig)
         assert isinstance(default_config.storage, StorageConfig)
         assert default_config.session_id is None
@@ -215,6 +236,8 @@ class TestClientConfig:
         assert loaded.appearance.ball_size == sample_config.appearance.ball_size
         assert loaded.appearance.theme == sample_config.appearance.theme
         assert loaded.chat_window.font_size == sample_config.chat_window.font_size
+        assert loaded.pet_runtime.current_pet_id == sample_config.pet_runtime.current_pet_id
+        assert loaded.pet_runtime.display_mode == sample_config.pet_runtime.display_mode
         assert loaded.session_id == sample_config.session_id
 
     @pytest.mark.unit

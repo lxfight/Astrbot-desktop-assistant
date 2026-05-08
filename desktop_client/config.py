@@ -187,6 +187,31 @@ class VoiceConfig:
     dual_output: bool = False
 
 
+@dataclass
+class PetRuntimeConfig:
+    """Codex-compatible 桌宠运行时配置"""
+
+    enabled: bool = True
+    display_mode: str = "pet"  # pet | ball
+    listen_host: str = "127.0.0.1"
+    listen_port: int = 17321
+    current_pet_id: str = "taotao"
+    pet_packages_dir: str = ""
+    window_scale: float = 1.0
+    always_on_top: bool = True
+    bubble_ttl_ms: int = 4000
+    api_enabled: bool = True
+
+    @property
+    def resolved_pet_packages_dir(self) -> Path:
+        if self.pet_packages_dir:
+            path = Path(self.pet_packages_dir)
+        else:
+            path = _get_config_dir_internal() / "pets"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+
 # 缓存配置目录路径，避免重复计算
 _cached_config_dir: Optional[Path] = None
 
@@ -361,6 +386,7 @@ class ClientConfig:
     voice: VoiceConfig = field(default_factory=VoiceConfig)
     hotkeys: HotkeyConfigData = field(default_factory=HotkeyConfigData)
     interaction: InteractionConfig = field(default_factory=InteractionConfig)
+    pet_runtime: PetRuntimeConfig = field(default_factory=PetRuntimeConfig)
     proactive: ProactiveDialogConfig = field(default_factory=ProactiveDialogConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
     update: UpdateConfig = field(default_factory=UpdateConfig)
@@ -485,6 +511,12 @@ class ClientConfig:
                         setattr(config.interaction, key, value)
 
             # 加载主动对话配置
+            if "pet_runtime" in data:
+                for key, value in data["pet_runtime"].items():
+                    if hasattr(config.pet_runtime, key):
+                        setattr(config.pet_runtime, key, value)
+
+            # 加载主动对话配置
             if "proactive" in data:
                 for key, value in data["proactive"].items():
                     if hasattr(config.proactive, key):
@@ -551,6 +583,7 @@ class ClientConfig:
                     "voice": asdict(self.voice),
                     "hotkeys": asdict(self.hotkeys),
                     "interaction": asdict(self.interaction),
+                    "pet_runtime": asdict(self.pet_runtime),
                     "proactive": asdict(self.proactive),
                     "storage": asdict(self.storage),
                     "update": asdict(self.update),
