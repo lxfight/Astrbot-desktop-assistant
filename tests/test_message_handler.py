@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from types import SimpleNamespace
 
 import pytest
@@ -29,6 +29,12 @@ class FakeFloatingBall:
     def set_unread_message(self, value: bool = True):
         self.calls.append(("unread", value))
 
+    def set_state(self, state):
+        self.calls.append(("state", state))
+
+    def show_system_message(self, text: str):
+        self.calls.append(("system", text))
+
     def has_active_response(self) -> bool:
         return self.active
 
@@ -40,6 +46,20 @@ class FakeFloatingBall:
 
 
 class TestMessageHandler:
+    @pytest.mark.unit
+    def test_duplicate_status_notice_is_throttled(self, sample_config):
+        floating_ball = FakeFloatingBall()
+        handler = MessageHandler(config=sample_config, floating_ball=floating_ball)
+
+        handler._show_status_notice_once("❌ 与服务器断开连接")
+        with patch(
+            "desktop_client.handlers.message_handler.time.monotonic",
+            return_value=5.0,
+        ):
+            handler._show_status_notice_once("❌ 与服务器断开连接")
+
+        assert floating_ball.calls.count(("system", "❌ 与服务器断开连接")) == 1
+
     @pytest.mark.unit
     def test_streaming_text_updates_even_when_chat_window_hidden(self, sample_config):
         floating_ball = FakeFloatingBall(visible=False, active=False)

@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -71,3 +71,18 @@ class TestDesktopClientApp:
 
         app._bridge.connect_server.assert_awaited_once()
         app._bridge.api_client.start_websocket.assert_not_called()
+
+    @pytest.mark.unit
+    def test_duplicate_connection_notice_is_throttled(self):
+        app = DesktopClientApp.__new__(DesktopClientApp)
+        app._floating_ball = MagicMock()
+        app._last_connection_notice = ("", 0.0)
+        app._connection_notice_cooldown = 10.0
+
+        DesktopClientApp._show_connection_notice(app, "连接失败: timeout")
+        with patch("desktop_client.app.time.monotonic", return_value=5.0):
+            DesktopClientApp._show_connection_notice(app, "连接失败: timeout")
+
+        app._floating_ball.show_system_message.assert_called_once_with(
+            "连接失败: timeout"
+        )

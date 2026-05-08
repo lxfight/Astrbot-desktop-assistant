@@ -3,6 +3,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import httpx
 
 from desktop_client.api_client import AstrBotApiClient
 
@@ -79,6 +80,45 @@ class TestAstrBotApiClientOpenApiMode:
         _, kwargs = http_client.get.call_args
         assert kwargs["params"] == {"username": "alice", "page": 1, "page_size": 1}
         assert kwargs["headers"]["Authorization"] == "Bearer abk_test"
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_openapi_login_reports_scope_error_as_api_key_failure(self):
+        client = AstrBotApiClient(
+            "http://localhost:6185",
+            username="alice",
+            api_key="abk_test",
+        )
+        response = MagicMock(status_code=403)
+        response.json.return_value = {"message": "Insufficient API key scope"}
+        http_client = MagicMock()
+        http_client.get = AsyncMock(return_value=response)
+        client._ensure_client = AsyncMock(return_value=http_client)
+
+        success, message = await client.login()
+
+        assert success is False
+        assert client.state.name == "ERROR"
+        assert message == "OpenAPI API Key 验证失败: Insufficient API key scope"
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_openapi_login_reports_timeout_as_connection_check_failure(self):
+        client = AstrBotApiClient(
+            "http://localhost:6185",
+            username="alice",
+            api_key="abk_test",
+        )
+        http_client = MagicMock()
+        http_client.get = AsyncMock(side_effect=httpx.ReadTimeout("slow"))
+        client._ensure_client = AsyncMock(return_value=http_client)
+
+        success, message = await client.login()
+
+        assert success is False
+        assert client.state.name == "ERROR"
+        assert message.startswith("OpenAPI 连接检测失败:")
+        assert "API Key 验证失败" not in message
 
     @pytest.mark.asyncio
     @pytest.mark.unit

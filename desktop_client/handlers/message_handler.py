@@ -8,6 +8,7 @@
 """
 
 import logging
+import time
 from typing import TYPE_CHECKING, Optional, Any
 
 from PySide6.QtCore import QObject, Slot
@@ -55,6 +56,8 @@ class MessageHandler(QObject):
         self._silent_response_metadata: dict = {}
         self._streaming_response_metadata: dict = {}
         self._active_response_request_id: Optional[str] = None
+        self._last_status_notice: tuple[str, float] = ("", 0.0)
+        self._status_notice_cooldown = 10.0
 
     def set_floating_ball(self, floating_ball: Any) -> None:
         """设置悬浮球实例"""
@@ -156,13 +159,23 @@ class MessageHandler(QObject):
         # content 是 ConnectionState 的 value
         if content == ConnectionState.DISCONNECTED.value:
             self._floating_ball.set_state(FloatingBallState.DISCONNECTED)
-            self._floating_ball.show_system_message("❌ 与服务器断开连接")
+            self._show_status_notice_once("❌ 与服务器断开连接")
         elif content == ConnectionState.CONNECTED.value:
             self._floating_ball.set_state(FloatingBallState.NORMAL)
-            self._floating_ball.show_system_message("✅ 已连接到服务器")
+            self._show_status_notice_once("✅ 已连接到服务器")
         elif content == ConnectionState.CONNECTING.value:
             # 连接中，暂不处理，保持当前状态或显示加载动画
             pass
+        elif content == ConnectionState.ERROR.value:
+            self._floating_ball.set_state(FloatingBallState.DISCONNECTED)
+
+    def _show_status_notice_once(self, text: str) -> None:
+        now = time.monotonic()
+        last_text, last_time = self._last_status_notice
+        if text == last_text and now - last_time < self._status_notice_cooldown:
+            return
+        self._last_status_notice = (text, now)
+        self._floating_ball.show_system_message(text)
 
     def _handle_text_message(
         self,

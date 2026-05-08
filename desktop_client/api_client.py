@@ -901,6 +901,9 @@ class AstrBotApiClient:
         self._health_check_interval: int = 30  # 30秒检测一次（从10秒增加）
         self._health_check_failures: int = 0  # 连续失败计数
         self._max_health_check_failures: int = 3  # 连续失败多少次才触发断联
+        self._last_http_check_error: str = ""
+        self._last_http_status_code: Optional[int] = None
+        self._last_http_failure_is_auth: bool = False
 
     @property
     def state(self) -> ConnectionState:
@@ -1090,6 +1093,15 @@ class AstrBotApiClient:
                 is_http_healthy = await self._check_http_connection()
 
                 if not is_http_healthy:
+                    if self.uses_openapi and self._last_http_failure_is_auth:
+                        logger.warning(
+                            "OpenAPI 鉴权检测失败，停止自动重连: %s",
+                            self._last_http_check_error,
+                        )
+                        self._health_check_failures = 0
+                        self.state = ConnectionState.ERROR
+                        continue
+
                     self._health_check_failures += 1
                     logger.warning(
                         f"⚠️ HTTP 健康检测失败 ({self._health_check_failures}/{self._max_health_check_failures})"
@@ -1129,6 +1141,32 @@ class AstrBotApiClient:
             except Exception as e:
                 logger.debug(f"健康检测异常: {e}")
 
+    def _record_http_check_success(self) -> None:
+        self._last_http_check_error = ""
+        self._last_http_status_code = None
+        self._last_http_failure_is_auth = False
+
+    def _record_http_check_failure(
+        self,
+        message: str,
+        status_code: Optional[int] = None,
+        is_auth: bool = False,
+    ) -> None:
+        self._last_http_check_error = message
+        self._last_http_status_code = status_code
+        self._last_http_failure_is_auth = is_auth
+
+    @staticmethod
+    def _extract_response_error_message(response: httpx.Response) -> str:
+        try:
+            data = response.json()
+        except Exception:
+            return ""
+        if not isinstance(data, dict):
+            return ""
+        value = data.get("message") or data.get("error") or data.get("detail")
+        return str(value) if value else ""
+
     async def _check_http_connection(self) -> bool:
         """
         检查 HTTP API 连接是否健康（内部方法，不改变状态）
@@ -1162,19 +1200,54 @@ class AstrBotApiClient:
             if response.status_code == 200:
                 data = response.json()
                 if data.get("status") == "ok":
+                    self._record_http_check_success()
                     return True
+                message = data.get("message") or data.get("error") or "响应状态不是 ok"
+                self._record_http_check_failure(str(message), response.status_code)
+                return False
+
+            response_message = self._extract_response_error_message(response)
+
+            if self.uses_openapi and response.status_code in (401, 403):
+                if response.status_code == 401:
+                    message = response_message or "API Key 无效或已过期"
+                else:
+                    message = response_message or "API Key 权限不足或缺少 chat scope"
+                self._record_http_check_failure(
+                    message,
+                    response.status_code,
+                    is_auth=True,
+                )
+                return False
 
             # 401 表示 token 过期
             if response.status_code == 401 and not self.uses_openapi:
                 logger.debug("⚠️ Token 已过期，需要重新登录")
                 self.token = None
+                self._record_http_check_failure(
+                    "Token 已过期",
+                    response.status_code,
+                    is_auth=True,
+                )
+                return False
+
+            self._record_http_check_failure(
+                response_message or f"HTTP {response.status_code}",
+                response.status_code,
+            )
 
             return False
 
+        except httpx.ConnectError as e:
+            self._record_http_check_failure(f"无法连接服务器: {e}")
+            logger.debug("⚠️ HTTP 连接检测失败: %s", e)
+            return False
         except httpx.TimeoutException:
+            self._record_http_check_failure("连接检测超时")
             logger.debug("⚠️ HTTP 连接检测超时")
             return False
         except Exception as e:
+            self._record_http_check_failure(f"连接检测异常: {e}")
             logger.debug(f"⚠️ HTTP 连接检测异常: {e}")
             return False
 
@@ -1229,11 +1302,16 @@ class AstrBotApiClient:
         self.state = ConnectionState.CONNECTING
 
         if self.uses_openapi:
-            ok = await self.check_connection()
+            ok = await self.check_connection(mark_disconnected=False)
             if ok:
                 await self.start_health_check()
                 return True, "OpenAPI 连接成功"
-            return False, "OpenAPI API Key 验证失败"
+
+            detail = self._last_http_check_error or "连接检测未通过"
+            self.state = ConnectionState.ERROR
+            if self._last_http_failure_is_auth:
+                return False, f"OpenAPI API Key 验证失败: {detail}"
+            return False, f"OpenAPI 连接检测失败: {detail}"
 
         username = username or self.username
         password = password or self.password
@@ -1290,7 +1368,7 @@ class AstrBotApiClient:
             self.state = ConnectionState.ERROR
             return False, f"登录异常: {e}"
 
-    async def check_connection(self) -> bool:
+    async def check_connection(self, *, mark_disconnected: bool = True) -> bool:
         """检查连接状态"""
         if not self.uses_openapi and not self.token:
             return False
@@ -1302,7 +1380,10 @@ class AstrBotApiClient:
             self._last_successful_request = time.time()
             return True
 
-        self.state = ConnectionState.DISCONNECTED
+        if self.uses_openapi and self._last_http_failure_is_auth:
+            self.state = ConnectionState.ERROR
+        elif mark_disconnected:
+            self.state = ConnectionState.DISCONNECTED
         return False
 
     async def start_websocket(

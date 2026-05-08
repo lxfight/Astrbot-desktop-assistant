@@ -18,6 +18,7 @@ AstrBot 桌面客户端主应用 (QAsync 重构版)
 import asyncio
 import os
 import sys
+import time
 from typing import Optional
 
 from PySide6.QtCore import QTimer, QObject
@@ -90,6 +91,8 @@ class DesktopClientApp(QObject):
         # 重连计时器
         self._reconnect_timer: Optional[QTimer] = None
         self._reconnect_attempts = 0
+        self._last_connection_notice: tuple[str, float] = ("", 0.0)
+        self._connection_notice_cooldown = 10.0
 
         # 确保 API Client 同步更新（为了兼容旧代码引用）
         self.api_client = self._bridge.api_client
@@ -278,8 +281,7 @@ class DesktopClientApp(QObject):
                 await self._start_websocket_connection()
         else:
             logger.error(f"服务器连接失败: {msg}")
-            if self._floating_ball:
-                self._floating_ball.show_system_message(f"连接失败: {msg}")
+            self._show_connection_notice(f"连接失败: {msg}")
 
             if self._proactive_service and self._proactive_service.is_running:
                 self._proactive_service.stop()
@@ -424,8 +426,7 @@ class DesktopClientApp(QObject):
         max_attempts = self.config.server.max_reconnect_attempts
         if max_attempts > 0 and self._reconnect_attempts >= max_attempts:
             logger.debug(f"已达到最大重连次数 ({max_attempts})，停止重连")
-            if self._floating_ball:
-                self._floating_ball.show_system_message("连接失败，已达最大重试次数")
+            self._show_connection_notice("连接失败，已达最大重试次数")
             return
 
         base_interval = self.config.server.reconnect_interval
@@ -443,6 +444,18 @@ class DesktopClientApp(QObject):
         self._reconnect_timer.start(int(interval * 1000))
 
         self._reconnect_attempts += 1
+
+    def _show_connection_notice(self, text: str) -> None:
+        if not self._floating_ball:
+            return
+
+        now = time.monotonic()
+        last_text, last_time = self._last_connection_notice
+        if text == last_text and now - last_time < self._connection_notice_cooldown:
+            return
+
+        self._last_connection_notice = (text, now)
+        self._floating_ball.show_system_message(text)
 
     def _cancel_reconnect(self):
         """取消重连定时器"""
