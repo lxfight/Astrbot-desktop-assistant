@@ -23,7 +23,8 @@
 
 同时支持导入 **CodexPet 兼容宠物包**来自定义桌宠形象。宠物包需要包含 `pet.json` 和 `spritesheet.webp`，在「设置 → 外观 → 宠物形象 → 添加宠物形象」中选择宠物包目录、`pet.json` 或 `spritesheet.webp` 即可导入。
 
-![桃桃与 CodexPet 自定义形象](docs/images/taotao-codexpet.svg)
+<img width="126" height="126" alt="PixPin_2026-05-08_17-06-43" src="https://github.com/user-attachments/assets/319f0cba-f117-44f8-86cc-16fde9630fac" />
+
 
 ### 🔐 OpenAPI (API Key) 连接
 
