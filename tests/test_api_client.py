@@ -60,6 +60,32 @@ class TestAstrBotApiClientOpenApiMode:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
+    async def test_openapi_websocket_uses_api_key_token(self):
+        client = AstrBotApiClient(
+            "http://localhost:6185",
+            username="alice",
+            api_key="abk_test",
+        )
+        ws_client = MagicMock()
+        ws_client.start = AsyncMock()
+
+        import desktop_client.api_client as api_module
+
+        original_ws_client = api_module.WebSocketClient
+        ws_client_factory = MagicMock(return_value=ws_client)
+        try:
+            api_module.WebSocketClient = ws_client_factory
+            await client.start_websocket("desktop_session")
+        finally:
+            api_module.WebSocketClient = original_ws_client
+
+        ws_client_factory.assert_called_once()
+        _, kwargs = ws_client_factory.call_args
+        assert kwargs["token"] == "abk_test"
+        ws_client.start.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
     async def test_openapi_check_connection_uses_username(self):
         client = AstrBotApiClient(
             "http://localhost:6185",
@@ -163,6 +189,67 @@ class TestAstrBotApiClientOpenApiMode:
         assert args[0] == "http://localhost:6185/api/v1/file"
         assert kwargs["headers"]["Authorization"] == "Bearer abk_test"
         assert kwargs["files"]["file"][0] == "demo.png"
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_openapi_upload_file_accepts_id_alias(self, tmp_path: Path):
+        file_path = tmp_path / "demo.webp"
+        file_path.write_bytes(b"fake image bytes")
+
+        client = AstrBotApiClient(
+            "http://localhost:6185",
+            username="alice",
+            api_key="abk_test",
+        )
+        response = MagicMock(status_code=201)
+        response.json.return_value = {
+            "status": "ok",
+            "data": {"id": "att_alias", "filename": "demo.webp"},
+        }
+        http_client = MagicMock()
+        http_client.post = AsyncMock(return_value=response)
+        client._ensure_client = AsyncMock(return_value=http_client)
+
+        success, payload = await client.upload_file(str(file_path))
+
+        assert success is True
+        assert payload["attachment_id"] == "att_alias"
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_send_image_message_uses_openapi_attachment_id_alias(
+        self, tmp_path: Path
+    ):
+        file_path = tmp_path / "shot.png"
+        file_path.write_bytes(b"fake image bytes")
+
+        client = AstrBotApiClient(
+            "http://localhost:6185",
+            username="alice",
+            api_key="abk_test",
+        )
+        client.upload_file = AsyncMock(
+            return_value=(True, {"id": "att_alias", "attachment_id": "att_alias"})
+        )
+        response = _FakeSseResponse(
+            200,
+            ['data: {"type":"end","data":"","streaming":false}'],
+        )
+        http_client = MagicMock()
+        http_client.stream = MagicMock(return_value=_FakeSseContext(response))
+        http_client.aclose = AsyncMock()
+        client._create_sse_client = MagicMock(return_value=http_client)
+
+        events = []
+        async for event in client.send_image_message("session_001", str(file_path), "看图"):
+            events.append(event)
+
+        assert [event.event_type for event in events] == ["end"]
+        _, kwargs = http_client.stream.call_args
+        assert kwargs["json"]["message"] == [
+            {"type": "plain", "text": "看图"},
+            {"type": "image", "attachment_id": "att_alias"},
+        ]
 
     @pytest.mark.asyncio
     @pytest.mark.unit

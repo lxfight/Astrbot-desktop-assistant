@@ -147,6 +147,22 @@ class TestSettingsController:
         floating_ball.update_pet_runtime_config.assert_called_once_with(sample_config)
 
     @pytest.mark.unit
+    def test_chat_window_history_display_limit_updates_window(self, sample_config):
+        compact_window = MagicMock()
+        floating_ball = MagicMock()
+        floating_ball._compact_window = compact_window
+        controller = SettingsController(
+            config=sample_config,
+            floating_ball=floating_ball,
+        )
+
+        controller._update_chat_window_settings({"history_display_limit": 7})
+
+        assert sample_config.chat_window.history_display_limit == 7
+        assert compact_window._max_history == 7
+        compact_window.reload_history_display.assert_called_once()
+
+    @pytest.mark.unit
     def test_pet_runtime_ball_mode_prompts_restart(self, sample_config):
         floating_ball = MagicMock()
         controller = SettingsController(

@@ -12,6 +12,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import mimetypes
 import os
 import time
 import uuid
@@ -985,6 +986,45 @@ class AstrBotApiClient:
             return {"Authorization": f"Bearer {self.token}"}
         return {}
 
+    @staticmethod
+    def _guess_content_type(filename: str) -> str:
+        mime_types = {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".gif": "image/gif",
+            ".webp": "image/webp",
+            ".bmp": "image/bmp",
+            ".wav": "audio/wav",
+            ".mp3": "audio/mpeg",
+            ".ogg": "audio/ogg",
+            ".mp4": "video/mp4",
+            ".mov": "video/quicktime",
+            ".webm": "video/webm",
+        }
+        ext = os.path.splitext(filename)[1].lower()
+        guessed = mime_types.get(ext) or mimetypes.guess_type(filename)[0]
+        return guessed or "application/octet-stream"
+
+    @staticmethod
+    def _normalize_upload_result(result: Any, fallback_filename: str = "") -> Optional[dict]:
+        if not isinstance(result, dict):
+            return None
+
+        attachment_id = (
+            result.get("attachment_id")
+            or result.get("id")
+            or result.get("file_id")
+        )
+        if not attachment_id:
+            return None
+
+        normalized = dict(result)
+        normalized["attachment_id"] = str(attachment_id)
+        if not normalized.get("filename") and fallback_filename:
+            normalized["filename"] = fallback_filename
+        return normalized
+
     async def _ensure_client(self) -> httpx.AsyncClient:
         """确保 HTTP 客户端已创建（单例复用）"""
         if self._client is None or self._client.is_closed:
@@ -1407,7 +1447,8 @@ class AstrBotApiClient:
                      - 如果指定（如 6190），将连接到该独立端口
                      - 如果为 None，将复用 API 端口
         """
-        if not self.token:
+        token = self.api_key if self.uses_openapi else self.token
+        if not token:
             logger.debug("启动 WebSocket 失败: 未登录")
             return
 
@@ -1416,7 +1457,7 @@ class AstrBotApiClient:
 
         self.ws_client = WebSocketClient(
             server_url=self.server_url,
-            token=self.token,
+            token=token,
             session_id=session_id,
             on_message=on_message,
             on_command=on_command,
@@ -1595,20 +1636,7 @@ class AstrBotApiClient:
             with open(file_path, "rb") as f:
                 file_content = f.read()
 
-            # 根据扩展名确定 MIME 类型
-            ext = os.path.splitext(filename)[1].lower()
-            mime_types = {
-                ".png": "image/png",
-                ".jpg": "image/jpeg",
-                ".jpeg": "image/jpeg",
-                ".gif": "image/gif",
-                ".webp": "image/webp",
-                ".bmp": "image/bmp",
-                ".wav": "audio/wav",
-                ".mp3": "audio/mpeg",
-                ".ogg": "audio/ogg",
-            }
-            content_type = mime_types.get(ext, "application/octet-stream")
+            content_type = self._guess_content_type(filename)
 
             # 构建 multipart 表单
             files = {"file": (filename, file_content, content_type)}
@@ -1627,14 +1655,21 @@ class AstrBotApiClient:
                 headers=headers,
             )
 
-            if response.status_code != 200:
+            if response.status_code not in (200, 201):
+                logger.debug(
+                    "上传文件失败: HTTP %s, body=%s",
+                    response.status_code,
+                    response.text[:300],
+                )
                 return False, None
 
             data = response.json()
 
             if data.get("status") == "ok":
-                return True, data.get("data")
+                normalized = self._normalize_upload_result(data.get("data"), filename)
+                return (True, normalized) if normalized else (False, None)
             else:
+                logger.debug(f"上传文件失败: {data.get('message') or data.get('error')}")
                 return False, None
 
         except httpx.ConnectError:

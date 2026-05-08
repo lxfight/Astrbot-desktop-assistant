@@ -101,6 +101,9 @@ class SettingsController(QObject):
         # 更新交互配置
         self._update_interaction_settings(settings.get("interaction", {}))
 
+        # 更新对话窗口配置
+        self._update_chat_window_settings(settings.get("chat_window", {}))
+
         # 更新桌宠运行时配置
         self._update_pet_runtime_settings(settings.get("pet_runtime", {}))
 
@@ -274,6 +277,35 @@ class SettingsController(QObject):
             self._config.interaction.bubble_auto_hide = interaction["bubble_auto_hide"]
         if "do_not_disturb" in interaction:
             self._config.interaction.do_not_disturb = interaction["do_not_disturb"]
+
+    def _update_chat_window_settings(self, chat_window: Dict[str, Any]) -> None:
+        """
+        更新对话窗口配置
+
+        Args:
+            chat_window: 对话窗口设置字典
+        """
+        if not chat_window or not hasattr(self._config, "chat_window"):
+            return
+
+        if "history_display_limit" in chat_window:
+            try:
+                value = int(chat_window["history_display_limit"])
+            except (TypeError, ValueError):
+                value = 10
+            self._config.chat_window.history_display_limit = max(0, min(1000, value))
+
+            if self._floating_ball:
+                compact_window = getattr(self._floating_ball, "_compact_window", None)
+                if compact_window is not None:
+                    setattr(
+                        compact_window,
+                        "_max_history",
+                        self._config.chat_window.history_display_limit,
+                    )
+                    reload_history = getattr(compact_window, "reload_history_display", None)
+                    if callable(reload_history):
+                        reload_history()
 
     def _update_pet_runtime_settings(self, pet_runtime: Dict[str, Any]) -> None:
         """

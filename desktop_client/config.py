@@ -150,6 +150,7 @@ class ChatWindowConfig:
     window_height: int = 600
     font_size: int = 14
     show_timestamp: bool = True
+    history_display_limit: int = 10
 
 
 @dataclass

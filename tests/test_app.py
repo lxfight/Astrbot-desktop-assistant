@@ -41,12 +41,30 @@ class TestDesktopClientApp:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_start_websocket_skips_in_openapi_mode(self):
+    async def test_start_websocket_uses_openapi_api_key(self):
         app = DesktopClientApp.__new__(DesktopClientApp)
         app.config = ClientConfig()
         app.config.server.enable_remote_control = True
         app.config.server.auth_mode = "openapi"
+        app.config.server.api_key = "abk_test"
+        app.config.session_id = "desktop_session"
         app._bridge = MagicMock()
+        app._bridge.api_client.start_websocket = AsyncMock()
+
+        await DesktopClientApp._start_websocket_connection(app)
+
+        app._bridge.api_client.start_websocket.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_start_websocket_skips_openapi_without_api_key(self):
+        app = DesktopClientApp.__new__(DesktopClientApp)
+        app.config = ClientConfig()
+        app.config.server.enable_remote_control = True
+        app.config.server.auth_mode = "openapi"
+        app.config.server.api_key = ""
+        app._bridge = MagicMock()
+        app._bridge.api_client.start_websocket = AsyncMock()
 
         await DesktopClientApp._start_websocket_connection(app)
 
@@ -54,11 +72,12 @@ class TestDesktopClientApp:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_reconnect_server_skips_websocket_in_openapi_mode(self):
+    async def test_reconnect_server_starts_websocket_in_openapi_mode(self):
         app = DesktopClientApp.__new__(DesktopClientApp)
         app.config = ClientConfig()
         app.config.server.enable_remote_control = True
         app.config.server.auth_mode = "openapi"
+        app.config.server.api_key = "abk_test"
         app.config.proactive.enabled = False
         app._bridge = MagicMock()
         app._bridge.connect_server = AsyncMock(return_value=(True, "OpenAPI 连接成功"))
@@ -70,7 +89,7 @@ class TestDesktopClientApp:
         await DesktopClientApp._reconnect_server(app)
 
         app._bridge.connect_server.assert_awaited_once()
-        app._bridge.api_client.start_websocket.assert_not_called()
+        app._bridge.api_client.start_websocket.assert_awaited_once()
 
     @pytest.mark.unit
     def test_duplicate_connection_notice_is_throttled(self):

@@ -66,6 +66,7 @@ def sample_config() -> ClientConfig:
     config.appearance.ball_size = 80
     config.appearance.theme = "dark"
     config.chat_window.font_size = 16
+    config.chat_window.history_display_limit = 25
     config.session_id = "test_session_001"
     return config
 

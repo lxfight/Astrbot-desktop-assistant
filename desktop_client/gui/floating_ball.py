@@ -12,6 +12,7 @@
 """
 
 from typing import Optional, Set, Dict, Any
+import time
 import os
 import sys
 import math
@@ -177,7 +178,7 @@ class CompactChatWindow(QWidget):
         self.setWindowFlags(flags)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
-        self._max_history = max(0, max_history)
+        self._max_history = self._resolve_history_display_limit(max_history)
         self._message_history = []  # [(msg_type, content, is_user), ...]
         self._attachment_path = None
         self._is_waiting = False
@@ -191,6 +192,12 @@ class CompactChatWindow(QWidget):
         self._current_ai_message = ""
         self._current_ai_label = None  # 当前 AI 回复的 MarkdownLabel
         self._current_ai_message_id: str = ""  # 当前流式响应的消息ID
+        self._pending_stream_metadata: Dict[str, Any] = {}
+        self._last_stream_flush_time = 0.0
+        self._stream_flush_interval = 0.05
+        self._stream_flush_timer = QTimer(self)
+        self._stream_flush_timer.setSingleShot(True)
+        self._stream_flush_timer.timeout.connect(self._flush_streaming_response)
 
         # 已显示消息ID集合，用于避免重复显示
         self._displayed_message_ids: Set[str] = set()
@@ -408,6 +415,24 @@ class CompactChatWindow(QWidget):
         # 历史记录将由 FloatingBallWindow 在头像设置完成后统一加载
         # 移除这里的延迟加载，避免与 FloatingBallWindow 中的 reload_history_display 产生竞态条件
         # 见 FloatingBallWindow.__init__ 中的 QTimer.singleShot(150, self._compact_window.reload_history_display)
+
+    def _resolve_history_display_limit(self, fallback: int = 0) -> int:
+        """解析聊天窗口最多显示多少条历史记录，0 表示不限制。"""
+        if fallback > 0:
+            return fallback
+
+        value = 10
+        if self._config and hasattr(self._config, "chat_window"):
+            value = getattr(self._config.chat_window, "history_display_limit", value)
+        elif isinstance(self._config, dict):
+            chat_window = self._config.get("chat_window", {})
+            if isinstance(chat_window, dict):
+                value = chat_window.get("history_display_limit", value)
+
+        try:
+            return max(0, min(1000, int(value)))
+        except (TypeError, ValueError):
+            return 10
 
     def _on_theme_changed(self, theme: Theme):
         """主题切换时只更新样式，不重新加载历史"""
@@ -781,7 +806,7 @@ class CompactChatWindow(QWidget):
             self._message_labels.clear()
 
             # 重新加载显示
-            messages = self._chat_history.get_messages()
+            messages = self._chat_history.get_messages(self._max_history)
             print(f"[CompactChatWindow] 加载 {len(messages)} 条历史记录")
 
             for msg in messages:
@@ -807,7 +832,7 @@ class CompactChatWindow(QWidget):
 
         try:
             # 显示已有的消息
-            messages = self._chat_history.get_messages()
+            messages = self._chat_history.get_messages(self._max_history)
             print(f"[CompactChatWindow] _load_history: 加载 {len(messages)} 条消息")
 
             for msg in messages:
@@ -1705,6 +1730,8 @@ class CompactChatWindow(QWidget):
     ):
         """更新流式响应"""
         self._current_ai_message += content
+        if metadata:
+            self._pending_stream_metadata.update(metadata)
 
         # 如果还没有创建AI消息，先创建一个
         if not self._current_ai_message_id:
@@ -1724,17 +1751,35 @@ class CompactChatWindow(QWidget):
                     self._current_ai_label = label
                     self._message_labels[msg.id] = label
         else:
-            # 更新历史记录中的消息
-            self._chat_history.update_message(
-                self._current_ai_message_id, self._current_ai_message
-            )
-            if metadata:
-                self._chat_history.update_message_metadata(
-                    self._current_ai_message_id, metadata
+            now = time.monotonic()
+            if now - self._last_stream_flush_time >= self._stream_flush_interval:
+                self._flush_streaming_response()
+            elif not self._stream_flush_timer.isActive():
+                remaining_ms = int(
+                    max(1, (self._stream_flush_interval - (now - self._last_stream_flush_time)) * 1000)
                 )
-            # 直接更新当前label
-            if self._current_ai_label:
-                self._current_ai_label.set_markdown(self._current_ai_message)
+                self._stream_flush_timer.start(remaining_ms)
+
+        self._scroll_to_bottom()
+
+    def _flush_streaming_response(self):
+        """节流刷新流式响应，避免每个 token 都重排 Markdown 和触发保存。"""
+        if not self._current_ai_message_id:
+            return
+
+        self._last_stream_flush_time = time.monotonic()
+
+        self._chat_history.update_message(
+            self._current_ai_message_id, self._current_ai_message
+        )
+        if self._pending_stream_metadata:
+            self._chat_history.update_message_metadata(
+                self._current_ai_message_id, self._pending_stream_metadata
+            )
+            self._pending_stream_metadata = {}
+
+        if self._current_ai_label:
+            self._current_ai_label.set_markdown(self._current_ai_message)
 
         self._scroll_to_bottom()
 
@@ -1860,6 +1905,7 @@ class CompactChatWindow(QWidget):
 
         # 保存最终内容
         if self._current_ai_message_id and self._current_ai_message:
+            self._flush_streaming_response()
             self._chat_history.update_message(
                 self._current_ai_message_id, self._current_ai_message
             )
@@ -1867,6 +1913,8 @@ class CompactChatWindow(QWidget):
         self._current_ai_message = ""
         self._current_ai_label = None
         self._current_ai_message_id = ""
+        self._pending_stream_metadata = {}
+        self._stream_flush_timer.stop()
 
         # 确保保存
         self._chat_history.save_to_file()

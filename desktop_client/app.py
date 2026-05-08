@@ -274,11 +274,14 @@ class DesktopClientApp(QObject):
                     logger.debug("主动对话服务已启动")
 
             # 启动 WebSocket 连接（用于接收远程命令）
-            if (
-                self.config.server.enable_remote_control
-                and self.config.server.auth_mode == "legacy"
-            ):
-                await self._start_websocket_connection()
+        if (
+            self.config.server.enable_remote_control
+            and (
+                self.config.server.auth_mode == "legacy"
+                or self.config.server.api_key
+            )
+        ):
+            await self._start_websocket_connection()
         else:
             logger.error(f"服务器连接失败: {msg}")
             self._show_connection_notice(f"连接失败: {msg}")
@@ -295,8 +298,11 @@ class DesktopClientApp(QObject):
         if not self.config.server.enable_remote_control:
             logger.debug("远控 WebSocket 未启用，跳过连接")
             return
-        if self.config.server.auth_mode != "legacy":
-            logger.warning("远控 WebSocket 依赖 legacy 插件 token，OpenAPI 模式下已跳过")
+        if (
+            self.config.server.auth_mode != "legacy"
+            and not self.config.server.api_key
+        ):
+            logger.warning("远控 WebSocket 缺少可用于认证的 OpenAPI API Key")
             return
 
         session_id = self.config.session_id

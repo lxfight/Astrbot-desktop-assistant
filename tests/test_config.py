@@ -123,6 +123,7 @@ class TestChatWindowConfig:
         assert config.window_height == 600
         assert config.font_size == 14
         assert config.show_timestamp is True
+        assert config.history_display_limit == 10
 
 
 class TestStorageConfig:
@@ -236,6 +237,10 @@ class TestClientConfig:
         assert loaded.appearance.ball_size == sample_config.appearance.ball_size
         assert loaded.appearance.theme == sample_config.appearance.theme
         assert loaded.chat_window.font_size == sample_config.chat_window.font_size
+        assert (
+            loaded.chat_window.history_display_limit
+            == sample_config.chat_window.history_display_limit
+        )
         assert loaded.pet_runtime.current_pet_id == sample_config.pet_runtime.current_pet_id
         assert loaded.pet_runtime.display_mode == sample_config.pet_runtime.display_mode
         assert loaded.session_id == sample_config.session_id

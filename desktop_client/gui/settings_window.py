@@ -925,6 +925,16 @@ class SettingsWindow(QWidget):
 
         chat_section.add_row("聊天记录保存路径", chat_path_row, orientation="vertical")
 
+        self._history_display_limit = QSpinBox()
+        self._history_display_limit.setRange(0, 1000)
+        self._history_display_limit.setValue(10)
+        self._history_display_limit.setSuffix(" 条")
+        self._history_display_limit.setSpecialValueText("不限制")
+        self._history_display_limit.setToolTip(
+            "控制对话窗口启动或重载时显示最近多少条历史消息；历史文件仍会完整保留。"
+        )
+        chat_section.add_row("启动时显示历史", self._history_display_limit)
+
         # 清空聊天记录按钮
         clear_btn_row = QFrame()
         clear_btn_layout = QHBoxLayout(clear_btn_row)
@@ -957,6 +967,7 @@ class SettingsWindow(QWidget):
         info_label = QLabel(
             "• 图片/截图保存路径：设置截图和 AI 生成图片的本地保存位置，留空则使用默认路径。\n"
             "• 聊天记录保存路径：设置聊天记录的保存位置，留空则使用默认路径。\n"
+            "• 启动时显示历史：只限制窗口加载显示数量，不会删除已经保存的聊天记录。\n"
             "• 清空聊天记录将删除所有历史消息，此操作不可恢复。"
         )
         info_label.setWordWrap(True)
@@ -2311,7 +2322,20 @@ class SettingsWindow(QWidget):
             # 确保图片保存路径显示正确
             self._image_save_path.setText(self.config.storage.image_save_path or "")
 
-            # 更新聊天记录数量
+        if hasattr(self.config, "chat_window") and hasattr(
+            self.config.chat_window, "history_display_limit"
+        ):
+            self._history_display_limit.setValue(
+                int(self.config.chat_window.history_display_limit)
+            )
+        elif isinstance(self.config, dict):
+            chat_window = self.config.get("chat_window", {})
+            value = 10
+            if isinstance(chat_window, dict):
+                value = chat_window.get("history_display_limit", value)
+            self._history_display_limit.setValue(int(value))
+
+        # 更新聊天记录数量
         chat_manager = get_chat_history_manager()
         msg_count = chat_manager.get_message_count()
         self._chat_count_label.setText(f"当前共 {msg_count} 条消息")
@@ -2726,6 +2750,9 @@ class SettingsWindow(QWidget):
                 "image_save_path": self._image_save_path.text().strip(),
                 "chat_history_path": self._chat_history_path.text().strip(),
             },
+            "chat_window": {
+                "history_display_limit": self._history_display_limit.value(),
+            },
             "custom_theme": self._build_custom_theme_config(),
             "update": {
                 "enabled": self._update_enabled.isChecked(),
@@ -2853,6 +2880,12 @@ class SettingsWindow(QWidget):
             self.config.storage.chat_history_path = settings["storage"][
                 "chat_history_path"
             ]
+
+            # 对话窗口
+            if hasattr(self.config, "chat_window"):
+                self.config.chat_window.history_display_limit = settings[
+                    "chat_window"
+                ]["history_display_limit"]
 
             # 更新设置
             if "update" in settings:
