@@ -9,9 +9,37 @@
 
 **一个安静陪伴你的桌面悬浮球，随时可聊、随时可见**
 
-[⚡ 快速安装](#-快速安装) · [✨ 核心功能](#-核心功能) · [🔌 附加能力](#-附加能力qq-远程功能) · [🍎 平台说明](#-平台特别说明)
+[⚡ 快速安装](#-快速安装) · [🆕 本次更新](#-本次更新重点) · [✨ 核心功能](#-核心功能) · [🔌 附加能力](#-附加能力qq-远程功能) · [🍎 平台说明](#-平台特别说明)
 
 </div>
+
+---
+
+## 🆕 本次更新重点
+
+### 🐾 默认桌宠形象：桃桃
+
+桌面入口现在默认使用 **桃桃**，这是木有知自己制作的 Q 版桌宠形象。第一次启动时不再只是一个悬浮球，而是一个会待在桌面上的小桌宠；如果你更喜欢传统悬浮球，也可以在「设置 → 外观 → 桌面形象」里切回「悬浮球」。
+
+同时支持导入 **CodexPet 兼容宠物包**来自定义桌宠形象。宠物包需要包含 `pet.json` 和 `spritesheet.webp`，在「设置 → 外观 → 宠物形象 → 添加宠物形象」中选择宠物包目录、`pet.json` 或 `spritesheet.webp` 即可导入。
+
+![桃桃与 CodexPet 自定义形象](docs/images/taotao-codexpet.svg)
+
+### 🔐 OpenAPI (API Key) 连接
+
+新增 **OpenAPI (API Key)** 连接模式，推荐新用户优先使用。相比早期的账号密码模式，API Key 更适合长期连接和远程部署：不需要在客户端保存 AstrBot 管理员密码，服务端升级后也更稳定。
+
+在桌面客户端中打开「设置 → 服务器」，将「认证方式」切换为 `OpenAPI (API Key)`，填入 `abk_` 开头的 API Key 后保存。WebSocket 地址可以留空，客户端会自动按服务器地址生成；如果你使用了反向代理或自定义路径，再填写完整 `ws://` / `wss://` 地址。
+
+![桌面客户端 OpenAPI 连接配置](docs/images/openapi-client-settings.svg)
+
+API Key 在 AstrBot 管理面板中创建：进入「设置」，找到「API Key」区域，填写 Key 名称，选择有效期，然后点击「创建 API Key」。建议至少勾选 `chat` 和 `file` 权限：`chat` 用于对话和 WebSocket 远控认证，`file` 用于图片、截图等附件上传；如果你的 AstrBot 面板按图中方式提供 `config`、`im` 等权限，也可以一起勾选，省得后续功能扩展时再回来补权限。
+
+![AstrBot 创建 API Key](docs/images/astrbot-api-key-create.svg)
+
+### 🔌 服务端插件同步适配
+
+OpenAPI 模式下，桌面客户端会通过 AstrBot OpenAPI 上传图片、截图等附件，并用 API Key 连接远控 WebSocket。请同步更新服务端插件 [astrbot_plugin_desktop_assistant](https://github.com/muyouzhi6/astrbot_plugin_desktop_assistant) 到 `v1.1.5` 或更新版本，否则可能出现聊天可用但截图、远程桌面状态、QQ 远控等能力不可用的问题。
 
 ---
 
@@ -118,7 +146,7 @@ AI：看起来遇到了难题？要不要说说你的思路，
 ### 前置条件
 
 - ✅ AstrBot 服务端已部署并运行
-- ✅ 已安装服务端插件 [astrbot_plugin_desktop_assistant](https://github.com/muyouzhi6/astrbot_plugin_desktop_assistant)
+- ✅ 已安装服务端插件 [astrbot_plugin_desktop_assistant](https://github.com/muyouzhi6/astrbot_plugin_desktop_assistant) `v1.1.5` 或更新版本
 
 ### 🌟 方式一：一键安装（推荐）
 
@@ -181,8 +209,11 @@ python -m desktop_client
 2. 填写服务器地址：
    - 本地部署：`http://127.0.0.1:6185`
    - 远程服务器：`http://你的服务器IP:6185`
-3. 填写用户名密码（AstrBot 管理员账号）
-4. 保存设置
+3. 认证方式推荐选择 `OpenAPI (API Key)`
+4. 在 AstrBot 管理面板「设置 → API Key」中创建 API Key，并复制 `abk_` 开头的完整密钥
+5. 回到桌面客户端，粘贴到「API Key」输入框，保存设置
+
+如果你还在使用旧版本插件，也可以继续选择账号密码模式；但新版本更推荐 OpenAPI (API Key)，尤其是远程服务器、Docker 部署、截图附件上传和 QQ 远控场景。
 
 点击悬浮球，说一声"你好"，你的桌面 AI 伙伴已经准备好了 🎉
 
@@ -227,8 +258,9 @@ Bot：根据截图，你的代码第 42 行有个 NullPointerException...
 需要正确配置 WebSocket 连接：
 
 1. 确保服务端插件已启用
-2. 在客户端设置中配置 WebSocket 端口（默认 6190）
-3. 开放服务器防火墙端口 6190
+2. 客户端启用远控 WebSocket。OpenAPI 模式会使用同一个 API Key 认证；账号密码模式会使用旧 token 认证
+3. 在客户端设置中配置 WebSocket 端口（默认 6190），或在反向代理场景填写完整 WebSocket 地址
+4. 开放服务器防火墙端口 6190
 
 ```bash
 # Linux (firewalld)
